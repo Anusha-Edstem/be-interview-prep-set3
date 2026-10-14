@@ -24,3 +24,6 @@ management:
     health:
       probes:
         enabled: true
+file-storage:
+  location: ./storage
+  max-file-size: 5MB
