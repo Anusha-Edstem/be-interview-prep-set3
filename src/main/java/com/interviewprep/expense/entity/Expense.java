@@ -15,22 +15,22 @@ import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 @Entity
 @Table(name = "expenses")
 @Getter
-@Setter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Expense {
+
+    public static final int AMOUNT_SCALE = 2;
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "amount", nullable = false, precision = 12, scale = 2)
+    @Column(name = "amount", nullable = false, precision = 12, scale = AMOUNT_SCALE)
     private BigDecimal amount;
 
     @Enumerated(EnumType.STRING)
@@ -52,6 +52,10 @@ public class Expense {
     private Instant updatedAt;
 
     public Expense(BigDecimal amount, ExpenseCategory category, LocalDate date, String note) {
+        revise(amount, category, date, note);
+    }
+
+    public void revise(BigDecimal amount, ExpenseCategory category, LocalDate date, String note) {
         this.amount = amount;
         this.category = category;
         this.date = date;
