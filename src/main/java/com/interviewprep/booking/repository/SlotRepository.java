@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -30,4 +31,21 @@ public interface SlotRepository extends JpaRepository<Slot, UUID> {
             @Param("from") Instant from,
             @Param("to") Instant to,
             @Param("now") Instant now);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Slot s
+            set s.status = com.interviewprep.booking.entity.SlotStatus.HELD,
+                s.patientId = :patientId,
+                s.holdExpiresAt = :expiresAt,
+                s.version = s.version + 1
+            where s.id = :slotId
+              and (s.status = com.interviewprep.booking.entity.SlotStatus.AVAILABLE
+                   or (s.status = com.interviewprep.booking.entity.SlotStatus.HELD and s.holdExpiresAt <= :now))
+            """)
+    int hold(
+            @Param("slotId") UUID slotId,
+            @Param("patientId") String patientId,
+            @Param("now") Instant now,
+            @Param("expiresAt") Instant expiresAt);
 }

@@ -1,10 +1,14 @@
 package com.interviewprep.booking.service;
 
+import com.interviewprep.booking.config.BookingProperties;
 import com.interviewprep.booking.dto.AvailableSlotResponse;
 import com.interviewprep.booking.dto.DoctorResponse;
+import com.interviewprep.booking.dto.SlotResponse;
+import com.interviewprep.booking.entity.Slot;
 import com.interviewprep.booking.mapper.BookingMapper;
 import com.interviewprep.booking.repository.DoctorRepository;
 import com.interviewprep.booking.repository.SlotRepository;
+import com.interviewprep.shared.error.ConflictException;
 import com.interviewprep.shared.error.NotFoundException;
 import com.interviewprep.shared.web.PageResponse;
 import java.time.Clock;
@@ -31,6 +35,7 @@ public class BookingService {
     private final SlotCalendar slotCalendar;
     private final SlotMaterializer slotMaterializer;
     private final BookingMapper mapper;
+    private final BookingProperties properties;
     private final Clock clock;
 
     public BookingService(
@@ -39,12 +44,14 @@ public class BookingService {
             SlotCalendar slotCalendar,
             SlotMaterializer slotMaterializer,
             BookingMapper mapper,
+            BookingProperties properties,
             Clock clock) {
         this.doctorRepository = doctorRepository;
         this.slotRepository = slotRepository;
         this.slotCalendar = slotCalendar;
         this.slotMaterializer = slotMaterializer;
         this.mapper = mapper;
+        this.properties = properties;
         this.clock = clock;
     }
 
@@ -69,12 +76,34 @@ public class BookingService {
                 .toList();
     }
 
+    @Transactional
+    public SlotResponse hold(UUID slotId, String patientId) {
+        Instant now = now();
+        int held = slotRepository.hold(slotId, patientId, now, now.plus(properties.holdDuration()));
+        if (held == 0) {
+            requireExists(slotId);
+            throw new ConflictException(
+                    "slot-unavailable", "Slot unavailable", "The slot is already held or booked by another patient");
+        }
+        return mapper.toResponse(load(slotId));
+    }
+
     private void ensureSlotsExist(UUID doctorId, List<SlotWindow> windows) {
         try {
             slotMaterializer.createMissing(doctorId, windows);
         } catch (DataIntegrityViolationException concurrentlyCreated) {
             slotMaterializer.createMissing(doctorId, windows);
         }
+    }
+
+    private void requireExists(UUID slotId) {
+        if (!slotRepository.existsById(slotId)) {
+            throw new NotFoundException("Slot", slotId);
+        }
+    }
+
+    private Slot load(UUID slotId) {
+        return slotRepository.findById(slotId).orElseThrow(() -> new NotFoundException("Slot", slotId));
     }
 
     private Instant now() {

@@ -23,12 +23,79 @@ class SlotRepositoryTest {
     private static final UUID DOCTOR_ID = UUID.fromString("6f1c2a3e-4b5d-4e6f-8a7b-0c1d2e3f4a51");
     private static final Instant NINE = Instant.parse("2026-10-15T09:00:00Z");
     private static final Duration SLOT = Duration.ofMinutes(30);
+    private static final Duration HOLD = Duration.ofMinutes(5);
+    private static final Instant NOW = Instant.parse("2026-10-14T08:00:00Z");
 
     @Autowired
     private SlotRepository slotRepository;
 
     @Autowired
     private DoctorRepository doctorRepository;
+
+    @Test
+    @DisplayName("BOOK-05 holding a free slot marks it held for the patient until the expiry")
+    void holdFreeSlot() {
+        Slot slot = freeSlot(NINE);
+
+        int updated = slotRepository.hold(slot.getId(), "patient-1", NOW, NOW.plus(HOLD));
+
+        Slot reloaded = slotRepository.findById(slot.getId()).orElseThrow();
+        assertThat(updated).isEqualTo(1);
+        assertThat(reloaded.getStatus()).isEqualTo(SlotStatus.HELD);
+        assertThat(reloaded.getPatientId()).isEqualTo("patient-1");
+        assertThat(reloaded.getHoldExpiresAt()).isEqualTo(NOW.plus(HOLD));
+        assertThat(reloaded.getVersion()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("BOOK-08 an active hold cannot be taken over by another patient")
+    void activeHoldIsNotTakenOver() {
+        Slot slot = freeSlot(NINE);
+        slotRepository.hold(slot.getId(), "patient-1", NOW, NOW.plus(HOLD));
+
+        int updated = slotRepository.hold(slot.getId(), "patient-2", NOW.plusSeconds(60), NOW.plus(HOLD));
+
+        Slot reloaded = slotRepository.findById(slot.getId()).orElseThrow();
+        assertThat(updated).isZero();
+        assertThat(reloaded.getPatientId()).isEqualTo("patient-1");
+    }
+
+    @Test
+    @DisplayName("BOOK-12 an expired hold can be taken by another patient")
+    void expiredHoldIsTakenOver() {
+        Slot slot = freeSlot(NINE);
+        slotRepository.hold(slot.getId(), "patient-1", NOW, NOW.plus(HOLD));
+        Instant later = NOW.plus(HOLD).plusSeconds(1);
+
+        int updated = slotRepository.hold(slot.getId(), "patient-2", later, later.plus(HOLD));
+
+        Slot reloaded = slotRepository.findById(slot.getId()).orElseThrow();
+        assertThat(updated).isEqualTo(1);
+        assertThat(reloaded.getPatientId()).isEqualTo("patient-2");
+        assertThat(reloaded.getHoldExpiresAt()).isEqualTo(later.plus(HOLD));
+    }
+
+    @Test
+    @DisplayName("BOOK-12 an active hold is hidden from the bookable list and an expired one is shown")
+    void bookableListTreatsExpiredHoldAsFree() {
+        Slot slot = freeSlot(NINE);
+        slotRepository.hold(slot.getId(), "patient-1", NOW, NOW.plus(HOLD));
+        Instant dayEnd = NINE.plus(Duration.ofHours(8));
+
+        List<Slot> whileHeld = slotRepository.findBookable(DOCTOR_ID, NINE, dayEnd, NOW.plusSeconds(1));
+        List<Slot> afterExpiry = slotRepository.findBookable(DOCTOR_ID, NINE, dayEnd, NOW.plus(HOLD));
+
+        assertThat(whileHeld).isEmpty();
+        assertThat(afterExpiry).extracting(Slot::getId).containsExactly(slot.getId());
+    }
+
+    @Test
+    @DisplayName("BOOK-07 a hold on a slot that does not exist updates nothing")
+    void holdUnknownSlotUpdatesNothing() {
+        int updated = slotRepository.hold(UUID.randomUUID(), "patient-1", NOW, NOW.plus(HOLD));
+
+        assertThat(updated).isZero();
+    }
 
     @Test
     @DisplayName("BOOK-01 migration seeds the doctors")
@@ -74,5 +141,9 @@ class SlotRepositoryTest {
         List<Instant> starts = slotRepository.findStartTimes(DOCTOR_ID, NINE, NINE.plus(SLOT));
 
         assertThat(starts).containsExactly(NINE);
+    }
+
+    private Slot freeSlot(Instant start) {
+        return slotRepository.saveAndFlush(Slot.available(DOCTOR_ID, start, start.plus(SLOT)));
     }
 }

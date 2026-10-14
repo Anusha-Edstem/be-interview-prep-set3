@@ -15,11 +15,14 @@ import static org.mockito.Mockito.when;
 import com.interviewprep.booking.config.BookingProperties;
 import com.interviewprep.booking.dto.AvailableSlotResponse;
 import com.interviewprep.booking.dto.DoctorResponse;
+import com.interviewprep.booking.dto.SlotResponse;
 import com.interviewprep.booking.entity.Doctor;
 import com.interviewprep.booking.entity.Slot;
+import com.interviewprep.booking.entity.SlotStatus;
 import com.interviewprep.booking.mapper.BookingMapper;
 import com.interviewprep.booking.repository.DoctorRepository;
 import com.interviewprep.booking.repository.SlotRepository;
+import com.interviewprep.shared.error.ConflictException;
 import com.interviewprep.shared.error.NotFoundException;
 import com.interviewprep.shared.web.PageResponse;
 import java.time.Clock;
@@ -29,6 +32,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -78,7 +82,46 @@ class BookingServiceTest {
                 new SlotCalendar(properties),
                 slotMaterializer,
                 new BookingMapper(),
+                properties,
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    @DisplayName("BOOK-05 a hold that wins the conditional update returns the held slot")
+    void holdReturnsHeldSlot() {
+        Instant expiresAt = NOW.plus(Duration.ofMinutes(5));
+        Slot slot = withState(slot(DAY_START), SlotStatus.HELD, "patient-1", expiresAt);
+        when(slotRepository.hold(slot.getId(), "patient-1", NOW, expiresAt)).thenReturn(1);
+        when(slotRepository.findById(slot.getId())).thenReturn(Optional.of(slot));
+
+        SlotResponse response = service.hold(slot.getId(), "patient-1");
+
+        assertThat(response.status()).isEqualTo(SlotStatus.HELD);
+        assertThat(response.patientId()).isEqualTo("patient-1");
+        assertThat(response.holdExpiresAt()).isEqualTo(expiresAt);
+    }
+
+    @Test
+    @DisplayName("BOOK-07 holding a slot that does not exist raises not found")
+    void holdUnknownSlotIsNotFound() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.hold(eq(slotId), eq("patient-1"), any(), any())).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.hold(slotId, "patient-1")).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("BOOK-08 holding a slot someone else holds or booked raises slot-unavailable")
+    void holdTakenSlotIsConflict() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.hold(eq(slotId), eq("patient-2"), any(), any())).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.hold(slotId, "patient-2"))
+                .isInstanceOf(ConflictException.class)
+                .extracting("type")
+                .isEqualTo("slot-unavailable");
     }
 
     @Test
@@ -145,6 +188,13 @@ class BookingServiceTest {
     static Slot slot(Instant start) {
         Slot slot = Slot.available(DOCTOR_ID, start, start.plus(Duration.ofMinutes(30)));
         ReflectionTestUtils.setField(slot, "id", UUID.randomUUID());
+        return slot;
+    }
+
+    static Slot withState(Slot slot, SlotStatus status, String patientId, Instant holdExpiresAt) {
+        ReflectionTestUtils.setField(slot, "status", status);
+        ReflectionTestUtils.setField(slot, "patientId", patientId);
+        ReflectionTestUtils.setField(slot, "holdExpiresAt", holdExpiresAt);
         return slot;
     }
 
