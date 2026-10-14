@@ -19,6 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.interviewprep.expense.dto.ExpenseFilter;
 import com.interviewprep.expense.dto.ExpenseRequest;
 import com.interviewprep.expense.dto.ExpenseResponse;
+import com.interviewprep.expense.dto.ExpenseSummaryResponse;
 import com.interviewprep.expense.entity.ExpenseCategory;
 import com.interviewprep.expense.service.ExpenseService;
 import com.interviewprep.expense.service.InvalidDateRangeException;
@@ -26,7 +27,10 @@ import com.interviewprep.shared.error.NotFoundException;
 import com.interviewprep.shared.web.PageResponse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -336,6 +340,41 @@ class ExpenseControllerTest {
         mockMvc.perform(delete("/api/v1/expenses/{id}", EXPENSE_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    @DisplayName("EXP-10 the summary route is not captured by the id route and renders every total with two decimals")
+    void summaryReturnsTotals() throws Exception {
+        Map<ExpenseCategory, BigDecimal> totals = new EnumMap<>(ExpenseCategory.class);
+        totals.put(ExpenseCategory.FOOD, new BigDecimal("0.30"));
+        totals.put(ExpenseCategory.TRAVEL, new BigDecimal("0.00"));
+        totals.put(ExpenseCategory.BILLS, new BigDecimal("0.00"));
+        totals.put(ExpenseCategory.OTHER, new BigDecimal("0.00"));
+        given(service.summarize(YearMonth.of(2026, 10)))
+                .willReturn(new ExpenseSummaryResponse(YearMonth.of(2026, 10), totals, new BigDecimal("0.30")));
+
+        mockMvc.perform(get("/api/v1/expenses/summary").param("month", "2026-10"))
+                .andExpect(status().isOk())
+                .andExpect(content()
+                        .string("{\"month\":\"2026-10\",\"totals\":{\"FOOD\":0.30,\"TRAVEL\":0.00,"
+                                + "\"BILLS\":0.00,\"OTHER\":0.00},\"overall\":0.30}"));
+
+        verify(service).summarize(YearMonth.of(2026, 10));
+    }
+
+    @Test
+    @DisplayName("EXP-11 the summary without a month or with a malformed month returns 400")
+    void summaryWithMissingOrMalformedMonthRejected() throws Exception {
+        mockMvc.perform(get("/api/v1/expenses/summary"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+        mockMvc.perform(get("/api/v1/expenses/summary").param("month", "2026-13"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad request"));
+        mockMvc.perform(get("/api/v1/expenses/summary").param("month", "October"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
     }
 
     private static ExpenseResponse lunch() {

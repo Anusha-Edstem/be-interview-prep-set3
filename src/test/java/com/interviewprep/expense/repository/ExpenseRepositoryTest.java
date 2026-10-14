@@ -108,6 +108,42 @@ class ExpenseRepositoryTest {
         assertThat(everything).hasSize(5);
     }
 
+    @Test
+    @DisplayName("EXP-10 monthly sums include the first and last day of the month and exclude the neighbouring days")
+    void monthlySumsHonourMonthBoundaries() {
+        storeAroundOctober();
+
+        List<CategoryTotal> totals = repository.sumByCategoryBetween(FIRST_DAY_OF_OCTOBER, LAST_DAY_OF_OCTOBER);
+
+        assertThat(totals)
+                .extracting(CategoryTotal::category)
+                .containsExactlyInAnyOrder(ExpenseCategory.FOOD, ExpenseCategory.TRAVEL);
+        assertThat(totalOf(totals, ExpenseCategory.FOOD)).isEqualByComparingTo("6.00");
+        assertThat(totalOf(totals, ExpenseCategory.TRAVEL)).isEqualByComparingTo("3.00");
+    }
+
+    @Test
+    @DisplayName("EXP-10 monthly sums are exact so 0.10 plus 0.20 is 0.30")
+    void monthlySumsAreExact() {
+        repository.saveAll(List.of(
+                expense("0.10", ExpenseCategory.FOOD, FIRST_DAY_OF_OCTOBER),
+                expense("0.20", ExpenseCategory.FOOD, LAST_DAY_OF_OCTOBER)));
+        repository.flush();
+
+        List<CategoryTotal> totals = repository.sumByCategoryBetween(FIRST_DAY_OF_OCTOBER, LAST_DAY_OF_OCTOBER);
+
+        assertThat(totals).hasSize(1);
+        assertThat(totalOf(totals, ExpenseCategory.FOOD)).isEqualByComparingTo("0.30");
+    }
+
+    private static BigDecimal totalOf(List<CategoryTotal> totals, ExpenseCategory category) {
+        return totals.stream()
+                .filter(total -> total.category() == category)
+                .map(CategoryTotal::total)
+                .findFirst()
+                .orElseThrow();
+    }
+
     private void storeAroundOctober() {
         repository.saveAll(List.of(
                 expense("1.00", ExpenseCategory.FOOD, LAST_DAY_OF_SEPTEMBER),

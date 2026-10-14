@@ -3,12 +3,14 @@ package com.interviewprep.expense.controller;
 import com.interviewprep.expense.dto.ExpenseFilter;
 import com.interviewprep.expense.dto.ExpenseRequest;
 import com.interviewprep.expense.dto.ExpenseResponse;
+import com.interviewprep.expense.dto.ExpenseSummaryResponse;
 import com.interviewprep.expense.entity.ExpenseCategory;
 import com.interviewprep.expense.service.ExpenseService;
 import com.interviewprep.shared.web.PageResponse;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.UUID;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -54,6 +56,11 @@ public class ExpenseController {
             @RequestParam(required = false) ExpenseCategory category,
             @PageableDefault(size = 20) Pageable pageable) {
         return service.list(new ExpenseFilter(from, to, category), pageable);
+    }
+
+    @GetMapping("/summary")
+    public ExpenseSummaryResponse summary(@RequestParam @DateTimeFormat(pattern = "yyyy-MM") YearMonth month) {
+        return service.summarize(month);
     }
 
     @GetMapping("/{id}")

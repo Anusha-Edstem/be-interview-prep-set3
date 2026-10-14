@@ -11,14 +11,17 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.interviewprep.expense.dto.ExpenseFilter;
 import com.interviewprep.expense.dto.ExpenseRequest;
 import com.interviewprep.expense.dto.ExpenseResponse;
+import com.interviewprep.expense.dto.ExpenseSummaryResponse;
 import com.interviewprep.expense.entity.Expense;
 import com.interviewprep.expense.entity.ExpenseCategory;
 import com.interviewprep.expense.mapper.ExpenseMapper;
+import com.interviewprep.expense.repository.CategoryTotal;
 import com.interviewprep.expense.repository.ExpenseRepository;
 import com.interviewprep.shared.error.NotFoundException;
 import com.interviewprep.shared.web.PageResponse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -189,6 +192,47 @@ class ExpenseServiceTest {
 
     private static Expense lunch() {
         return withId(new Expense(new BigDecimal("12.50"), ExpenseCategory.FOOD, LocalDate.of(2026, 10, 1), "Lunch"));
+    }
+
+    @Test
+    @DisplayName("EXP-10 summary queries from the first to the last day of the month inclusive")
+    void summaryQueriesWholeMonth() {
+        given(repository.sumByCategoryBetween(any(), any())).willReturn(List.of());
+
+        service.summarize(YearMonth.of(2028, 2));
+
+        verify(repository).sumByCategoryBetween(LocalDate.of(2028, 2, 1), LocalDate.of(2028, 2, 29));
+    }
+
+    @Test
+    @DisplayName("EXP-10 summary lists every category at scale 2 and adds the overall total exactly")
+    void summaryFillsEveryCategoryAndAddsExactly() {
+        given(repository.sumByCategoryBetween(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31)))
+                .willReturn(List.of(
+                        new CategoryTotal(ExpenseCategory.FOOD, new BigDecimal("0.30")),
+                        new CategoryTotal(ExpenseCategory.BILLS, new BigDecimal("1000000.1"))));
+
+        ExpenseSummaryResponse summary = service.summarize(YearMonth.of(2026, 10));
+
+        assertThat(summary.month()).isEqualTo(YearMonth.of(2026, 10));
+        assertThat(summary.totals()).containsOnlyKeys(ExpenseCategory.values());
+        assertThat(summary.totals().get(ExpenseCategory.FOOD)).hasToString("0.30");
+        assertThat(summary.totals().get(ExpenseCategory.BILLS)).hasToString("1000000.10");
+        assertThat(summary.totals().get(ExpenseCategory.TRAVEL)).hasToString("0.00");
+        assertThat(summary.totals().get(ExpenseCategory.OTHER)).hasToString("0.00");
+        assertThat(summary.overall()).hasToString("1000000.40");
+    }
+
+    @Test
+    @DisplayName("EXP-10 summary of a month without expenses is all zeros")
+    void summaryOfEmptyMonthIsZero() {
+        given(repository.sumByCategoryBetween(any(), any())).willReturn(List.of());
+
+        ExpenseSummaryResponse summary = service.summarize(YearMonth.of(2026, 12));
+
+        assertThat(summary.totals().values())
+                .allSatisfy(total -> assertThat(total).hasToString("0.00"));
+        assertThat(summary.overall()).hasToString("0.00");
     }
 
     private static Specification<Expense> anySpecification() {
