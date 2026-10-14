@@ -33,7 +33,7 @@ class FileStorageTest {
 
     @BeforeEach
     void setUp() {
-        root = tempDir.resolve("storage").toAbsolutePath().normalize();
+        root = tempDir.resolve("outer/inner/storage").toAbsolutePath().normalize();
         storage = new FileStorage(new FileStorageProperties(root.toString(), DataSize.ofMegabytes(5)));
     }
 
@@ -72,8 +72,7 @@ class FileStorageTest {
 
         assertThatThrownBy(() -> storage.write("../../evil.txt", source)).isInstanceOf(FileStorageException.class);
 
-        assertThat(tempDir.resolve("evil.txt")).doesNotExist();
-        assertThat(tempDir.getParent().resolve("evil.txt")).doesNotExist();
+        assertThat(tempDir.resolve("outer/evil.txt")).doesNotExist();
         try (Stream<Path> files = Files.walk(tempDir)) {
             assertThat(files.filter(Files::isRegularFile)).isEmpty();
         }
@@ -127,7 +126,8 @@ class FileStorageTest {
     @Test
     @DisplayName("FILE-09 delete with a traversal name touches nothing outside the storage location")
     void traversalDeleteIsRejected() throws IOException {
-        Path outside = Files.writeString(tempDir.resolve("keep.txt"), "keep");
+        Path outside = Files.writeString(
+                Files.createDirectories(tempDir.resolve("outer/inner")).resolve("keep.txt"), "keep");
 
         assertThatThrownBy(() -> storage.delete("../keep.txt")).isInstanceOf(FileStorageException.class);
 

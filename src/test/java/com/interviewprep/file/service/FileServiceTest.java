@@ -65,7 +65,7 @@ class FileServiceTest {
 
     @BeforeEach
     void setUp() {
-        root = tempDir.resolve("storage").toAbsolutePath().normalize();
+        root = tempDir.resolve("outer/inner/storage").toAbsolutePath().normalize();
         FileStorageProperties properties = new FileStorageProperties(root.toString(), DataSize.ofMegabytes(5));
         storage = new FileStorage(properties);
         service = new FileService(repository, storage, new StoredFileMapper(), properties);
@@ -272,7 +272,7 @@ class FileServiceTest {
                 .hasSize(1)
                 .allSatisfy(path -> assertThat(path.getParent()).isEqualTo(root));
         assertThat(tempDir.resolve("evil.png")).doesNotExist();
-        assertThat(tempDir.getParent().resolve("evil.png")).doesNotExist();
+        assertThat(tempDir.resolve("outer/evil.png")).doesNotExist();
         try (Stream<Path> everything = Files.walk(tempDir)) {
             assertThat(everything.filter(Files::isRegularFile))
                     .allSatisfy(path -> assertThat(path).startsWithRaw(root));
