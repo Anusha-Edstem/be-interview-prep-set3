@@ -168,4 +168,33 @@ class BookRepositoryTest {
         assertThat(found).get().extracting(Loan::getId).isEqualTo(open.getId());
         assertThat(found).get().extracting(Loan::getMemberId).isEqualTo("member-2");
     }
+
+    @Test
+    @DisplayName("LIB-10 a borrowed book is not deleted")
+    void deleteSkipsBorrowedBook() {
+        UUID bookId = bookRepository
+                .saveAndFlush(new Book("Kept", "Lender", "9786666666661", 2004))
+                .getId();
+        bookRepository.markBorrowedIfAvailable(bookId);
+
+        int deleted = bookRepository.deleteIfNotBorrowed(bookId);
+
+        assertThat(deleted).isZero();
+        assertThat(bookRepository.existsById(bookId)).isTrue();
+    }
+
+    @Test
+    @DisplayName("LIB-09 deleting an available book also removes its returned loan history")
+    void deleteCascadesLoanHistory() {
+        Book book = bookRepository.saveAndFlush(new Book("Gone", "Lender", "9786666666662", 2005));
+        Loan returned = new Loan(book, "member-1", Instant.parse("2026-01-01T00:00:00Z"));
+        returned.markReturned(Instant.parse("2026-01-02T00:00:00Z"));
+        UUID loanId = loanRepository.saveAndFlush(returned).getId();
+
+        int deleted = bookRepository.deleteIfNotBorrowed(book.getId());
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(bookRepository.existsById(book.getId())).isFalse();
+        assertThat(loanRepository.existsById(loanId)).isFalse();
+    }
 }

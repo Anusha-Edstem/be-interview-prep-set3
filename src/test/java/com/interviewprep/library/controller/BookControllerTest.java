@@ -21,6 +21,7 @@ import com.interviewprep.library.dto.BookRequest;
 import com.interviewprep.library.dto.BookResponse;
 import com.interviewprep.library.dto.BorrowRequest;
 import com.interviewprep.library.dto.LoanResponse;
+import com.interviewprep.library.exception.BookBorrowedException;
 import com.interviewprep.library.exception.BookNotBorrowedException;
 import com.interviewprep.library.exception.BookUnavailableException;
 import com.interviewprep.library.exception.DuplicateIsbnException;
@@ -240,6 +241,18 @@ class BookControllerTest {
         willThrow(new NotFoundException("Book", BOOK_ID)).given(bookService).delete(BOOK_ID);
 
         mockMvc.perform(delete("/api/v1/books/{id}", BOOK_ID)).andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("LIB-10 deleting a borrowed book returns 409 book-borrowed")
+    void deleteBorrowedReturnsConflict() throws Exception {
+        willThrow(new BookBorrowedException(BOOK_ID)).given(bookService).delete(BOOK_ID);
+
+        mockMvc.perform(delete("/api/v1/books/{id}", BOOK_ID))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("https://be-interview-prep/problems/book-borrowed"))
+                .andExpect(jsonPath("$.title").value("Book borrowed"));
     }
 
     @Test

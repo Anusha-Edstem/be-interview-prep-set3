@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import com.interviewprep.library.dto.BookRequest;
 import com.interviewprep.library.dto.BookResponse;
 import com.interviewprep.library.entity.Book;
+import com.interviewprep.library.exception.BookBorrowedException;
 import com.interviewprep.library.exception.DuplicateIsbnException;
 import com.interviewprep.library.mapper.BookMapper;
 import com.interviewprep.library.repository.BookRepository;
@@ -149,18 +150,31 @@ class BookServiceTest {
     @Test
     @DisplayName("LIB-09 delete removes an existing book")
     void deleteRemovesBook() {
-        given(bookRepository.existsById(BOOK_ID)).willReturn(true);
+        given(bookRepository.deleteIfNotBorrowed(BOOK_ID)).willReturn(1);
 
         bookService.delete(BOOK_ID);
 
-        verify(bookRepository).deleteById(BOOK_ID);
+        verify(bookRepository).deleteIfNotBorrowed(BOOK_ID);
+        verify(bookRepository, never()).existsById(any());
     }
 
     @Test
     @DisplayName("LIB-09 delete raises not found for an unknown id")
     void deleteUnknownRaisesNotFound() {
+        given(bookRepository.deleteIfNotBorrowed(BOOK_ID)).willReturn(0);
         given(bookRepository.existsById(BOOK_ID)).willReturn(false);
 
         assertThatThrownBy(() -> bookService.delete(BOOK_ID)).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("LIB-10 delete rejects a book that is currently borrowed")
+    void deleteRejectsBorrowedBook() {
+        given(bookRepository.deleteIfNotBorrowed(BOOK_ID)).willReturn(0);
+        given(bookRepository.existsById(BOOK_ID)).willReturn(true);
+
+        assertThatThrownBy(() -> bookService.delete(BOOK_ID))
+                .isInstanceOf(BookBorrowedException.class)
+                .hasMessageContaining(BOOK_ID.toString());
     }
 }

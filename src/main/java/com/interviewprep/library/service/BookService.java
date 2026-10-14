@@ -3,6 +3,7 @@ package com.interviewprep.library.service;
 import com.interviewprep.library.dto.BookRequest;
 import com.interviewprep.library.dto.BookResponse;
 import com.interviewprep.library.entity.Book;
+import com.interviewprep.library.exception.BookBorrowedException;
 import com.interviewprep.library.exception.DuplicateIsbnException;
 import com.interviewprep.library.mapper.BookMapper;
 import com.interviewprep.library.repository.BookRepository;
@@ -62,10 +63,10 @@ public class BookService {
     }
 
     public void delete(UUID id) {
-        if (!bookRepository.existsById(id)) {
-            throw new NotFoundException(BOOK, id);
+        boolean deleted = bookRepository.deleteIfNotBorrowed(id) == 1;
+        if (!deleted) {
+            throw bookRepository.existsById(id) ? new BookBorrowedException(id) : new NotFoundException(BOOK, id);
         }
-        bookRepository.deleteById(id);
     }
 
     private Book findBook(UUID id) {

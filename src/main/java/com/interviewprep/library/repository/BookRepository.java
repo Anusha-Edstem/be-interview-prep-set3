@@ -32,4 +32,8 @@ public interface BookRepository extends JpaRepository<Book, UUID> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update Book b set b.borrowed = false where b.id = :id and b.borrowed = true")
     int markReturnedIfBorrowed(@Param("id") UUID id);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from Book b where b.id = :id and b.borrowed = false")
+    int deleteIfNotBorrowed(@Param("id") UUID id);
 }
