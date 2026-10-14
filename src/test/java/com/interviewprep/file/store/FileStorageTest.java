@@ -2,14 +2,18 @@ package com.interviewprep.file.store;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mockStatic;
 
 import com.interviewprep.file.config.FileStorageProperties;
 import com.interviewprep.file.error.FileStorageException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,7 +21,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.InputStreamSource;
 import org.springframework.core.io.Resource;
 import org.springframework.util.unit.DataSize;
 
@@ -132,5 +139,83 @@ class FileStorageTest {
         assertThatThrownBy(() -> storage.delete("../keep.txt")).isInstanceOf(FileStorageException.class);
 
         assertThat(outside).exists();
+    }
+
+    @Test
+    @DisplayName("FILE-01 a stream that fails mid-copy raises a storage error and leaves no partial file")
+    void failedWriteRemovesPartialFile() throws IOException {
+        String storedName = UUID.randomUUID().toString();
+        Path target = storage.resolve(storedName);
+        AtomicBoolean partialFileExisted = new AtomicBoolean();
+
+        assertThatThrownBy(() -> storage.write(storedName, failingAfter(1024, target, partialFileExisted)))
+                .isInstanceOf(FileStorageException.class)
+                .hasMessage("The file could not be processed by storage")
+                .cause()
+                .isInstanceOf(IOException.class)
+                .hasMessage("connection reset");
+
+        assertThat(partialFileExisted).isTrue();
+        assertThat(target).doesNotExist();
+        try (Stream<Path> files = Files.list(root)) {
+            assertThat(files).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("FILE-01 a failure to remove the partial file is attached to the write failure")
+    void failedCleanupIsSuppressed() {
+        String storedName = UUID.randomUUID().toString();
+        Path target = storage.resolve(storedName);
+        IOException cleanupFailure = new IOException("file locked");
+
+        try (MockedStatic<Files> files = mockStatic(Files.class, Mockito.CALLS_REAL_METHODS)) {
+            files.when(() -> Files.deleteIfExists(target)).thenThrow(cleanupFailure);
+
+            assertThatThrownBy(() -> storage.write(storedName, failingAfter(1024, target, new AtomicBoolean())))
+                    .isInstanceOf(FileStorageException.class)
+                    .cause()
+                    .hasMessage("connection reset")
+                    .hasSuppressedException(cleanupFailure);
+        }
+    }
+
+    @Test
+    @DisplayName("FILE-09 a delete that the file system refuses raises a storage error")
+    void failedDeleteRaisesStorageError() throws IOException {
+        String storedName = UUID.randomUUID().toString();
+        Path blocking = Files.createDirectories(root.resolve(storedName));
+        Files.writeString(blocking.resolve("child.txt"), "keeps the directory non-empty");
+
+        assertThatThrownBy(() -> storage.delete(storedName))
+                .isInstanceOf(FileStorageException.class)
+                .hasMessage("The file could not be processed by storage")
+                .hasCauseInstanceOf(DirectoryNotEmptyException.class);
+
+        assertThat(blocking).isDirectory();
+    }
+
+    @Test
+    @DisplayName("FILE-05 a name the file system cannot represent is rejected")
+    void invalidPathIsRejected() {
+        assertThatThrownBy(() -> storage.resolve("evil\u0000.txt"))
+                .isInstanceOf(FileStorageException.class)
+                .hasMessage("The file could not be located in storage");
+    }
+
+    private static InputStreamSource failingAfter(int byteCount, Path target, AtomicBoolean partialFileExisted) {
+        return () -> new InputStream() {
+            private int served;
+
+            @Override
+            public int read() throws IOException {
+                if (served == byteCount) {
+                    partialFileExisted.set(Files.exists(target));
+                    throw new IOException("connection reset");
+                }
+                served++;
+                return 'x';
+            }
+        };
     }
 }
