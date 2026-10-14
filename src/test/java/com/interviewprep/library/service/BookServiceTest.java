@@ -14,6 +14,8 @@ import com.interviewprep.library.exception.DuplicateIsbnException;
 import com.interviewprep.library.mapper.BookMapper;
 import com.interviewprep.library.repository.BookRepository;
 import com.interviewprep.shared.error.NotFoundException;
+import com.interviewprep.shared.web.PageResponse;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +25,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 @ExtendWith(MockitoExtension.class)
 class BookServiceTest {
@@ -66,6 +71,33 @@ class BookServiceTest {
                 .isInstanceOf(DuplicateIsbnException.class)
                 .hasMessageContaining("9780132350884");
         verify(bookRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("LIB-04 list searches with lower-cased contains patterns and escapes LIKE wildcards")
+    void listBuildsEscapedContainsPatterns() {
+        Pageable pageable = PageRequest.of(0, 20);
+        Book book = new Book("100% Clean_Code", "Robert C. Martin", "9780132350884", 2008);
+        given(bookRepository.search("%100!% clean!_code%", "%martin%", pageable))
+                .willReturn(new PageImpl<>(List.of(book), pageable, 1));
+
+        PageResponse<BookResponse> page = bookService.list(" 100% Clean_Code ", "MARTIN", pageable);
+
+        assertThat(page.content()).extracting(BookResponse::title).containsExactly("100% Clean_Code");
+        assertThat(page.totalElements()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("LIB-04 list without search terms matches every book")
+    void listWithoutTermsMatchesEverything() {
+        Pageable pageable = PageRequest.of(1, 5);
+        given(bookRepository.search("%", "%", pageable)).willReturn(new PageImpl<>(List.of(), pageable, 5));
+
+        PageResponse<BookResponse> page = bookService.list(null, " ", pageable);
+
+        assertThat(page.content()).isEmpty();
+        assertThat(page.page()).isEqualTo(1);
+        assertThat(page.totalElements()).isEqualTo(5);
     }
 
     @Test

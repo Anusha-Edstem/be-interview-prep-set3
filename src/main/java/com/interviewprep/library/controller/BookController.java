@@ -5,6 +5,7 @@ import com.interviewprep.library.dto.BookResponse;
 import com.interviewprep.library.service.BookService;
 import com.interviewprep.shared.web.PageResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
 import java.net.URI;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
@@ -48,8 +50,11 @@ public class BookController {
     }
 
     @GetMapping
-    public PageResponse<BookResponse> list(@PageableDefault(size = 20) Pageable pageable) {
-        return bookService.list(capped(pageable));
+    public PageResponse<BookResponse> list(
+            @RequestParam(required = false) @Size(max = 255) String title,
+            @RequestParam(required = false) @Size(max = 255) String author,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return bookService.list(title, author, capped(pageable));
     }
 
     @GetMapping("/{id}")

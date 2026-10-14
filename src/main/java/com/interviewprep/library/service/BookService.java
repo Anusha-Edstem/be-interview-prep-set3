@@ -19,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class BookService {
 
     private static final String BOOK = "Book";
+    private static final String MATCH_ANYTHING = "%";
+    private static final char LIKE_ESCAPE = '!';
 
     private final BookRepository bookRepository;
     private final BookMapper bookMapper;
@@ -38,8 +40,10 @@ public class BookService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<BookResponse> list(Pageable pageable) {
-        return PageResponse.of(bookRepository.findAll(pageable), bookMapper::toResponse);
+    public PageResponse<BookResponse> list(String title, String author, Pageable pageable) {
+        return PageResponse.of(
+                bookRepository.search(containsPattern(title), containsPattern(author), pageable),
+                bookMapper::toResponse);
     }
 
     @Transactional(readOnly = true)
@@ -66,6 +70,18 @@ public class BookService {
 
     private Book findBook(UUID id) {
         return bookRepository.findById(id).orElseThrow(() -> new NotFoundException(BOOK, id));
+    }
+
+    private static String containsPattern(String term) {
+        if (term == null || term.isBlank()) {
+            return MATCH_ANYTHING;
+        }
+        String escaped = term.strip()
+                .toLowerCase(Locale.ROOT)
+                .replace(String.valueOf(LIKE_ESCAPE), String.valueOf(LIKE_ESCAPE) + LIKE_ESCAPE)
+                .replace("%", LIKE_ESCAPE + "%")
+                .replace("_", LIKE_ESCAPE + "_");
+        return MATCH_ANYTHING + escaped + MATCH_ANYTHING;
     }
 
     private static String normalizeIsbn(String isbn) {

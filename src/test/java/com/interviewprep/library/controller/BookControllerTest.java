@@ -3,6 +3,7 @@ package com.interviewprep.library.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
@@ -129,7 +130,7 @@ class BookControllerTest {
     @Test
     @DisplayName("LIB-04 listing books returns a page and caps the page size at 100")
     void listCapsPageSize() throws Exception {
-        given(bookService.list(any(Pageable.class)))
+        given(bookService.list(isNull(), isNull(), any(Pageable.class)))
                 .willReturn(new PageResponse<>(List.of(sampleBook()), 0, 100, 1, 1));
 
         mockMvc.perform(get("/api/v1/books").param("page", "0").param("size", "500"))
@@ -138,8 +139,30 @@ class BookControllerTest {
                 .andExpect(jsonPath("$.totalElements").value(1));
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(bookService).list(pageable.capture());
+        verify(bookService).list(isNull(), isNull(), pageable.capture());
         assertThat(pageable.getValue().getPageSize()).isEqualTo(100);
+        assertThat(pageable.getValue().getPageNumber()).isZero();
+    }
+
+    @Test
+    @DisplayName("LIB-04 listing books passes the title and author search terms to the service")
+    void listPassesSearchTerms() throws Exception {
+        given(bookService.list(eq("clean"), eq("martin"), any(Pageable.class)))
+                .willReturn(new PageResponse<>(List.of(sampleBook()), 0, 20, 1, 1));
+
+        mockMvc.perform(get("/api/v1/books").param("title", "clean").param("author", "martin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.size").value(20));
+    }
+
+    @Test
+    @DisplayName("LIB-04 a search term longer than 255 characters returns 400")
+    void listRejectsOverlongSearchTerm() throws Exception {
+        mockMvc.perform(get("/api/v1/books").param("title", "x".repeat(256)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("title"));
+        verify(bookService, never()).list(any(), any(), any());
     }
 
     @Test
