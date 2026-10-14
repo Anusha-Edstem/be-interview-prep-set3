@@ -24,3 +24,8 @@ management:
     health:
       probes:
         enabled: true
+rate-limit:
+  max-requests: 10
+  window: 1m
+  paths:
+    - /api/v1/quotes/**
