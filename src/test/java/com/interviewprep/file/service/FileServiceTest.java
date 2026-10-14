@@ -3,6 +3,9 @@ package com.interviewprep.file.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -14,6 +17,7 @@ import com.interviewprep.file.dto.FileDownload;
 import com.interviewprep.file.dto.StoredFileResponse;
 import com.interviewprep.file.entity.StoredFile;
 import com.interviewprep.file.error.EmptyFileException;
+import com.interviewprep.file.error.FileStorageException;
 import com.interviewprep.file.error.FileTooLargeException;
 import com.interviewprep.file.error.UnsupportedFileTypeException;
 import com.interviewprep.file.mapper.StoredFileMapper;
@@ -46,6 +50,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.util.unit.DataSize;
+import org.springframework.web.multipart.MultipartFile;
 
 @ExtendWith(MockitoExtension.class)
 class FileServiceTest {
@@ -289,6 +294,49 @@ class FileServiceTest {
         assertThatThrownBy(() -> service.upload(file)).isSameAs(failure);
 
         assertThat(storedFiles()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("FILE-01 an upload stream that cannot be read raises a storage error and stores nothing")
+    void unreadableUploadRaisesStorageError() throws IOException {
+        IOException readFailure = new IOException("stream closed");
+        MultipartFile file = mock(MultipartFile.class);
+        when(file.isEmpty()).thenReturn(false);
+        when(file.getSize()).thenReturn(64L);
+        when(file.getOriginalFilename()).thenReturn("photo.png");
+        when(file.getInputStream()).thenThrow(readFailure);
+
+        assertThatThrownBy(() -> service.upload(file))
+                .isInstanceOf(FileStorageException.class)
+                .hasMessage("The uploaded file could not be read")
+                .hasCause(readFailure);
+
+        verifyNoInteractions(repository);
+        assertThat(storedFiles()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("FILE-01 a failed cleanup after a failed save is attached to the original database error")
+    void failedCleanupIsSuppressedOnSaveFailure() {
+        FileStorage failingStorage = mock(FileStorage.class);
+        FileService failingService = new FileService(
+                repository,
+                failingStorage,
+                new StoredFileMapper(),
+                new FileStorageProperties(root.toString(), DataSize.ofMegabytes(5)));
+        DataIntegrityViolationException failure = new DataIntegrityViolationException("duplicate");
+        FileStorageException cleanupFailure = new FileStorageException("The file could not be processed by storage");
+        when(repository.saveAndFlush(any(StoredFile.class))).thenThrow(failure);
+        doThrow(cleanupFailure).when(failingStorage).delete(anyString());
+        MockMultipartFile file = new MockMultipartFile("file", "photo.png", "image/png", FileFixtures.png());
+
+        assertThatThrownBy(() -> failingService.upload(file))
+                .isSameAs(failure)
+                .satisfies(thrown -> assertThat(thrown.getSuppressed()).containsExactly(cleanupFailure));
+
+        ArgumentCaptor<String> written = ArgumentCaptor.forClass(String.class);
+        verify(failingStorage).write(written.capture(), any());
+        verify(failingStorage).delete(written.getValue());
     }
 
     private void stubSave() {
