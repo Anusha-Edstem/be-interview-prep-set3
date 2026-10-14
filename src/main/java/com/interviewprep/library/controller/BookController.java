@@ -2,7 +2,10 @@ package com.interviewprep.library.controller;
 
 import com.interviewprep.library.dto.BookRequest;
 import com.interviewprep.library.dto.BookResponse;
+import com.interviewprep.library.dto.BorrowRequest;
+import com.interviewprep.library.dto.LoanResponse;
 import com.interviewprep.library.service.BookService;
+import com.interviewprep.library.service.LoanService;
 import com.interviewprep.shared.web.PageResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
@@ -34,9 +37,11 @@ public class BookController {
     private static final Sort BY_TITLE = Sort.by("title", "id");
 
     private final BookService bookService;
+    private final LoanService loanService;
 
-    public BookController(BookService bookService) {
+    public BookController(BookService bookService, LoanService loanService) {
         this.bookService = bookService;
+        this.loanService = loanService;
     }
 
     @PostMapping
@@ -71,6 +76,17 @@ public class BookController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID id) {
         bookService.delete(id);
+    }
+
+    @PostMapping("/{id}/borrow")
+    @ResponseStatus(HttpStatus.CREATED)
+    public LoanResponse borrow(@PathVariable UUID id, @Valid @RequestBody BorrowRequest request) {
+        return loanService.borrow(id, request);
+    }
+
+    @PostMapping("/{id}/return")
+    public LoanResponse returnBook(@PathVariable UUID id) {
+        return loanService.returnBook(id);
     }
 
     private static Pageable capped(Pageable requested) {

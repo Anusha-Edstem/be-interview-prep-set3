@@ -19,8 +19,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.interviewprep.library.dto.BookRequest;
 import com.interviewprep.library.dto.BookResponse;
+import com.interviewprep.library.dto.BorrowRequest;
+import com.interviewprep.library.dto.LoanResponse;
+import com.interviewprep.library.exception.BookNotBorrowedException;
+import com.interviewprep.library.exception.BookUnavailableException;
 import com.interviewprep.library.exception.DuplicateIsbnException;
 import com.interviewprep.library.service.BookService;
+import com.interviewprep.library.service.LoanService;
 import com.interviewprep.shared.error.NotFoundException;
 import com.interviewprep.shared.web.PageResponse;
 import java.time.Clock;
@@ -47,6 +52,7 @@ class BookControllerTest {
 
     private static final Instant NOW = Instant.parse("2026-06-15T10:00:00Z");
     private static final UUID BOOK_ID = UUID.fromString("7d1b6f3e-2c4a-4f0e-9a51-3f1f2b9c8e10");
+    private static final UUID LOAN_ID = UUID.fromString("0b9e5f0a-6d3c-4b8e-8a7f-1c2d3e4f5a6b");
 
     @TestConfiguration
     static class FixedClockConfig {
@@ -62,6 +68,9 @@ class BookControllerTest {
 
     @MockitoBean
     private BookService bookService;
+
+    @MockitoBean
+    private LoanService loanService;
 
     @Test
     @DisplayName("LIB-01 creating a valid book returns 201 with a Location header and the book")
@@ -231,6 +240,97 @@ class BookControllerTest {
         willThrow(new NotFoundException("Book", BOOK_ID)).given(bookService).delete(BOOK_ID);
 
         mockMvc.perform(delete("/api/v1/books/{id}", BOOK_ID)).andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("LIB-11 borrowing an available book returns 201 with the loan")
+    void borrowReturnsCreatedLoan() throws Exception {
+        given(loanService.borrow(BOOK_ID, new BorrowRequest("member-42"))).willReturn(openLoan());
+
+        mockMvc.perform(post("/api/v1/books/{id}/borrow", BOOK_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"memberId": "member-42"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(LOAN_ID.toString()))
+                .andExpect(jsonPath("$.bookId").value(BOOK_ID.toString()))
+                .andExpect(jsonPath("$.memberId").value("member-42"))
+                .andExpect(jsonPath("$.borrowedAt").value("2026-06-15T10:00:00Z"))
+                .andExpect(jsonPath("$.returnedAt").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("LIB-11 borrowing without a member id returns 400 with a field error")
+    void borrowRejectsBlankMember() throws Exception {
+        mockMvc.perform(post("/api/v1/books/{id}/borrow", BOOK_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"memberId": "  "}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("memberId"));
+        verify(loanService, never()).borrow(any(), any());
+    }
+
+    @Test
+    @DisplayName("LIB-11 borrowing an unknown book returns 404")
+    void borrowUnknownReturnsNotFound() throws Exception {
+        given(loanService.borrow(eq(BOOK_ID), any(BorrowRequest.class)))
+                .willThrow(new NotFoundException("Book", BOOK_ID));
+
+        mockMvc.perform(post("/api/v1/books/{id}/borrow", BOOK_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"memberId": "member-42"}
+                                """))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("LIB-12 borrowing a book that is already borrowed returns 409 book-unavailable problem detail")
+    void borrowUnavailableReturnsConflictProblem() throws Exception {
+        given(loanService.borrow(eq(BOOK_ID), any(BorrowRequest.class)))
+                .willThrow(new BookUnavailableException(BOOK_ID));
+
+        mockMvc.perform(post("/api/v1/books/{id}/borrow", BOOK_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"memberId": "member-7"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("https://be-interview-prep/problems/book-unavailable"))
+                .andExpect(jsonPath("$.title").value("Book unavailable"))
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.detail")
+                        .value("Book " + BOOK_ID + " is already borrowed and cannot be borrowed until it is returned"))
+                .andExpect(jsonPath("$.instance").value("/api/v1/books/" + BOOK_ID + "/borrow"));
+    }
+
+    @Test
+    @DisplayName("LIB-14 returning a borrowed book returns 200 with the closed loan")
+    void returnReturnsClosedLoan() throws Exception {
+        LoanResponse closed = new LoanResponse(LOAN_ID, BOOK_ID, "member-42", NOW, NOW.plusSeconds(3600));
+        given(loanService.returnBook(BOOK_ID)).willReturn(closed);
+
+        mockMvc.perform(post("/api/v1/books/{id}/return", BOOK_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.returnedAt").value("2026-06-15T11:00:00Z"));
+    }
+
+    @Test
+    @DisplayName("LIB-15 returning a book that is not borrowed returns 409 book-not-borrowed")
+    void returnNotBorrowedReturnsConflict() throws Exception {
+        given(loanService.returnBook(BOOK_ID)).willThrow(new BookNotBorrowedException(BOOK_ID));
+
+        mockMvc.perform(post("/api/v1/books/{id}/return", BOOK_ID))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("https://be-interview-prep/problems/book-not-borrowed"));
+    }
+
+    private static LoanResponse openLoan() {
+        return new LoanResponse(LOAN_ID, BOOK_ID, "member-42", NOW, null);
     }
 
     private static String validBookJson() {

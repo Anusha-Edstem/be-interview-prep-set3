@@ -4,6 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.interviewprep.library.entity.Book;
+import com.interviewprep.library.entity.Loan;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +24,9 @@ class BookRepositoryTest {
 
     @Autowired
     private BookRepository bookRepository;
+
+    @Autowired
+    private LoanRepository loanRepository;
 
     @Test
     @DisplayName("LIB-01 a saved book gets a generated id, timestamps and starts available")
@@ -100,5 +107,65 @@ class BookRepositoryTest {
 
         assertThat(takenByAnother).isFalse();
         assertThat(taken).isTrue();
+    }
+
+    @Test
+    @DisplayName("LIB-12 marking a book borrowed succeeds once and then matches no row")
+    void markBorrowedSucceedsOnlyWhileAvailable() {
+        UUID bookId = bookRepository
+                .saveAndFlush(new Book("Borrowable", "Lender", "9784444444441", 2001))
+                .getId();
+
+        int first = bookRepository.markBorrowedIfAvailable(bookId);
+        int second = bookRepository.markBorrowedIfAvailable(bookId);
+
+        assertThat(first).isEqualTo(1);
+        assertThat(second).isZero();
+        assertThat(bookRepository.findById(bookId))
+                .get()
+                .extracting(Book::isBorrowed)
+                .isEqualTo(true);
+    }
+
+    @Test
+    @DisplayName("LIB-11 marking an unknown book borrowed matches no row")
+    void markBorrowedUnknownMatchesNothing() {
+        int updated = bookRepository.markBorrowedIfAvailable(UUID.randomUUID());
+
+        assertThat(updated).isZero();
+    }
+
+    @Test
+    @DisplayName("LIB-15 marking a book returned only matches a borrowed book")
+    void markReturnedOnlyWhileBorrowed() {
+        UUID bookId = bookRepository
+                .saveAndFlush(new Book("Returnable", "Lender", "9784444444442", 2002))
+                .getId();
+
+        int whileAvailable = bookRepository.markReturnedIfBorrowed(bookId);
+        bookRepository.markBorrowedIfAvailable(bookId);
+        int whileBorrowed = bookRepository.markReturnedIfBorrowed(bookId);
+
+        assertThat(whileAvailable).isZero();
+        assertThat(whileBorrowed).isEqualTo(1);
+        assertThat(bookRepository.findById(bookId))
+                .get()
+                .extracting(Book::isBorrowed)
+                .isEqualTo(false);
+    }
+
+    @Test
+    @DisplayName("LIB-14 the open loan of a book is found and a returned loan is not")
+    void findsOnlyOpenLoan() {
+        Book book = bookRepository.saveAndFlush(new Book("Loaned", "Lender", "9784444444443", 2003));
+        Loan returned = new Loan(book, "member-1", Instant.parse("2026-01-01T00:00:00Z"));
+        returned.markReturned(Instant.parse("2026-01-02T00:00:00Z"));
+        loanRepository.saveAndFlush(returned);
+        Loan open = loanRepository.saveAndFlush(new Loan(book, "member-2", Instant.parse("2026-02-01T00:00:00Z")));
+
+        Optional<Loan> found = loanRepository.findByBookIdAndReturnedAtIsNull(book.getId());
+
+        assertThat(found).get().extracting(Loan::getId).isEqualTo(open.getId());
+        assertThat(found).get().extracting(Loan::getMemberId).isEqualTo("member-2");
     }
 }
