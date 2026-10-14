@@ -1,9 +1,11 @@
 package com.interviewprep.file.service;
 
+import com.interviewprep.file.config.FileStorageProperties;
 import com.interviewprep.file.dto.StoredFileResponse;
 import com.interviewprep.file.entity.StoredFile;
 import com.interviewprep.file.error.EmptyFileException;
 import com.interviewprep.file.error.FileStorageException;
+import com.interviewprep.file.error.FileTooLargeException;
 import com.interviewprep.file.error.UnsupportedFileTypeException;
 import com.interviewprep.file.mapper.StoredFileMapper;
 import com.interviewprep.file.repository.StoredFileRepository;
@@ -13,6 +15,7 @@ import java.io.InputStream;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.unit.DataSize;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
@@ -22,16 +25,25 @@ public class FileService {
     private final StoredFileRepository repository;
     private final FileStorage storage;
     private final StoredFileMapper mapper;
+    private final DataSize maxFileSize;
 
-    public FileService(StoredFileRepository repository, FileStorage storage, StoredFileMapper mapper) {
+    public FileService(
+            StoredFileRepository repository,
+            FileStorage storage,
+            StoredFileMapper mapper,
+            FileStorageProperties properties) {
         this.repository = repository;
         this.storage = storage;
         this.mapper = mapper;
+        this.maxFileSize = properties.maxFileSize();
     }
 
     public StoredFileResponse upload(MultipartFile file) {
         if (file.isEmpty()) {
             throw new EmptyFileException();
+        }
+        if (file.getSize() > maxFileSize.toBytes()) {
+            throw new FileTooLargeException(file.getSize(), maxFileSize);
         }
         String originalName = FileNames.sanitize(file.getOriginalFilename());
         FileType type = detectType(file);

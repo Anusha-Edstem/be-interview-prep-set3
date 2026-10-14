@@ -12,6 +12,7 @@ import com.interviewprep.file.config.FileStorageProperties;
 import com.interviewprep.file.dto.StoredFileResponse;
 import com.interviewprep.file.entity.StoredFile;
 import com.interviewprep.file.error.EmptyFileException;
+import com.interviewprep.file.error.FileTooLargeException;
 import com.interviewprep.file.error.UnsupportedFileTypeException;
 import com.interviewprep.file.mapper.StoredFileMapper;
 import com.interviewprep.file.repository.StoredFileRepository;
@@ -40,6 +41,7 @@ import org.springframework.util.unit.DataSize;
 class FileServiceTest {
 
     private static final Instant UPLOADED_AT = Instant.parse("2026-10-14T09:30:00Z");
+    private static final int MAX_BYTES = 5 * 1024 * 1024;
 
     @TempDir
     private Path tempDir;
@@ -53,8 +55,32 @@ class FileServiceTest {
     @BeforeEach
     void setUp() {
         root = tempDir.resolve("storage").toAbsolutePath().normalize();
-        FileStorage storage = new FileStorage(new FileStorageProperties(root.toString(), DataSize.ofMegabytes(5)));
-        service = new FileService(repository, storage, new StoredFileMapper());
+        FileStorageProperties properties = new FileStorageProperties(root.toString(), DataSize.ofMegabytes(5));
+        service = new FileService(repository, new FileStorage(properties), new StoredFileMapper(), properties);
+    }
+
+    @Test
+    @DisplayName("FILE-03 a file one byte over 5 MB is rejected before anything is stored")
+    void oversizedFileIsRejected() throws IOException {
+        MockMultipartFile file = new MockMultipartFile("file", "big.png", "image/png", FileFixtures.png(MAX_BYTES + 1));
+
+        assertThatThrownBy(() -> service.upload(file))
+                .isInstanceOf(FileTooLargeException.class)
+                .hasMessage("The file is 5242881 bytes, which exceeds the maximum allowed size of 5 MB");
+
+        verifyNoInteractions(repository);
+        assertThat(storedFiles()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("FILE-03 a file of exactly 5 MB is accepted")
+    void fileAtLimitIsAccepted() {
+        MockMultipartFile file = new MockMultipartFile("file", "big.png", "image/png", FileFixtures.png(MAX_BYTES));
+        stubSave();
+
+        StoredFileResponse response = service.upload(file);
+
+        assertThat(response.size()).isEqualTo(MAX_BYTES);
     }
 
     @Test

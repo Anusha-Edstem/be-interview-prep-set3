@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.interviewprep.file.FileFixtures;
+import com.interviewprep.file.config.FileStorageProperties;
 import com.interviewprep.file.entity.StoredFile;
 import com.interviewprep.file.mapper.StoredFileMapper;
 import com.interviewprep.file.repository.StoredFileRepository;
@@ -23,6 +24,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
@@ -33,6 +35,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(FileController.class)
 @Import({FileService.class, StoredFileMapper.class})
+@EnableConfigurationProperties(FileStorageProperties.class)
 class FileControllerTest {
 
     private static final String FILES = "/api/v1/files";
@@ -105,6 +108,25 @@ class FileControllerTest {
                         .value("The file extension '.png' does not match the file content, which is application/pdf"));
 
         verify(storage, never()).write(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("FILE-03 a file over 5 MB returns a 413 problem detail")
+    void oversizedFileIsRejected() throws Exception {
+        MockMultipartFile file =
+                new MockMultipartFile("file", "big.png", "image/png", FileFixtures.png(5 * 1024 * 1024 + 1));
+
+        mockMvc.perform(multipart(FILES).file(file))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value(PROBLEMS + "file-too-large"))
+                .andExpect(jsonPath("$.title").value("File too large"))
+                .andExpect(jsonPath("$.status").value(413))
+                .andExpect(jsonPath("$.detail")
+                        .value("The file is 5242881 bytes, which exceeds the maximum allowed size of 5 MB"));
+
+        verify(storage, never()).write(anyString(), any());
+        verify(repository, never()).saveAndFlush(any());
     }
 
     @Test
