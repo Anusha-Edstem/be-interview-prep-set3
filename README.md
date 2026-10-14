@@ -8,7 +8,7 @@ Five Spring Boot features, each delivered as its own branch, pull request and me
 | 2 | Expense Tracker | _pending_ |
 | 3 | File Upload Service | _pending_ |
 | 4 | API Rate Limiting | _pending_ |
-| 5 | Appointment Booking | _pending_ |
+| 5 | Appointment Booking | [#10](https://github.com/Anusha-Edstem/be-interview-prep-set3/pull/10) |
 
 **Video:** _to be added after the last merge_
 
