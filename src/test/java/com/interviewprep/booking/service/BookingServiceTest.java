@@ -1,0 +1,318 @@
+package com.interviewprep.booking.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+import com.interviewprep.booking.config.BookingProperties;
+import com.interviewprep.booking.dto.AvailableSlotResponse;
+import com.interviewprep.booking.dto.DoctorResponse;
+import com.interviewprep.booking.dto.SlotResponse;
+import com.interviewprep.booking.entity.Doctor;
+import com.interviewprep.booking.entity.Slot;
+import com.interviewprep.booking.entity.SlotStatus;
+import com.interviewprep.booking.mapper.BookingMapper;
+import com.interviewprep.booking.notification.BookingConfirmedEvent;
+import com.interviewprep.booking.repository.DoctorRepository;
+import com.interviewprep.booking.repository.SlotRepository;
+import com.interviewprep.shared.error.ConflictException;
+import com.interviewprep.shared.error.NotFoundException;
+import com.interviewprep.shared.web.PageResponse;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.test.util.ReflectionTestUtils;
+
+@ExtendWith(MockitoExtension.class)
+class BookingServiceTest {
+
+    private static final UUID DOCTOR_ID = UUID.randomUUID();
+    private static final LocalDate DAY = LocalDate.parse("2026-10-15");
+    private static final Instant NOW = Instant.parse("2026-10-14T08:00:00Z");
+    private static final Instant DAY_START = Instant.parse("2026-10-15T09:00:00Z");
+    private static final Instant DAY_END = Instant.parse("2026-10-15T17:00:00Z");
+
+    @Mock
+    private DoctorRepository doctorRepository;
+
+    @Mock
+    private SlotRepository slotRepository;
+
+    @Mock
+    private SlotMaterializer slotMaterializer;
+
+    @Mock
+    private ApplicationEventPublisher events;
+
+    private BookingService service;
+
+    @BeforeEach
+    void setUp() {
+        BookingProperties properties = new BookingProperties(
+                Duration.ofMinutes(30),
+                Duration.ofMinutes(5),
+                LocalTime.of(9, 0),
+                LocalTime.of(17, 0),
+                ZoneOffset.UTC,
+                Duration.ofSeconds(30));
+        service = new BookingService(
+                doctorRepository,
+                slotRepository,
+                new SlotCalendar(properties),
+                slotMaterializer,
+                new BookingMapper(),
+                properties,
+                events,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    @DisplayName("BOOK-05 a hold that wins the conditional update returns the held slot")
+    void holdReturnsHeldSlot() {
+        Instant expiresAt = NOW.plus(Duration.ofMinutes(5));
+        Slot slot = withState(slot(DAY_START), SlotStatus.HELD, "patient-1", expiresAt);
+        when(slotRepository.hold(slot.getId(), "patient-1", NOW, expiresAt)).thenReturn(1);
+        when(slotRepository.findById(slot.getId())).thenReturn(Optional.of(slot));
+
+        SlotResponse response = service.hold(slot.getId(), "patient-1");
+
+        assertThat(response.status()).isEqualTo(SlotStatus.HELD);
+        assertThat(response.patientId()).isEqualTo("patient-1");
+        assertThat(response.holdExpiresAt()).isEqualTo(expiresAt);
+    }
+
+    @Test
+    @DisplayName("BOOK-07 holding a slot that does not exist raises not found")
+    void holdUnknownSlotIsNotFound() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.hold(eq(slotId), eq("patient-1"), any(), any())).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.hold(slotId, "patient-1")).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("BOOK-08 holding a slot someone else holds or booked raises slot-unavailable")
+    void holdTakenSlotIsConflict() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.hold(eq(slotId), eq("patient-2"), any(), any())).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.hold(slotId, "patient-2"))
+                .isInstanceOf(ConflictException.class)
+                .extracting("type")
+                .isEqualTo("slot-unavailable");
+    }
+
+    @Test
+    @DisplayName("BOOK-01 doctors are listed by name with the page size capped")
+    void listDoctorsCapsPageSize() {
+        Doctor doctor = mock(Doctor.class);
+        when(doctor.getId()).thenReturn(DOCTOR_ID);
+        when(doctor.getName()).thenReturn("Dr. Asha Menon");
+        when(doctor.getSpecialty()).thenReturn("General Practice");
+        ArgumentCaptor<Pageable> pageCaptor = ArgumentCaptor.forClass(Pageable.class);
+        when(doctorRepository.findAll(pageCaptor.capture()))
+                .thenReturn(new PageImpl<>(List.of(doctor), PageRequest.of(0, 100), 1));
+
+        PageResponse<DoctorResponse> page = service.listDoctors(PageRequest.of(0, 500));
+
+        assertThat(pageCaptor.getValue().getPageSize()).isEqualTo(BookingService.MAX_PAGE_SIZE);
+        assertThat(pageCaptor.getValue().getSort().getOrderFor("name")).isNotNull();
+        assertThat(page.content()).containsExactly(new DoctorResponse(DOCTOR_ID, "Dr. Asha Menon", "General Practice"));
+    }
+
+    @Test
+    @DisplayName("BOOK-04 slots of an unknown doctor raise not found without creating slots")
+    void unknownDoctorIsNotFound() {
+        when(doctorRepository.existsById(DOCTOR_ID)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.listAvailableSlots(DOCTOR_ID, DAY)).isInstanceOf(NotFoundException.class);
+
+        verify(slotMaterializer, never()).createMissing(any(), anyList());
+    }
+
+    @Test
+    @DisplayName("BOOK-02 the day's windows are materialised and the bookable slots returned")
+    void listMaterialisesThenReadsBookableSlots() {
+        Slot slot = slot(DAY_START);
+        when(doctorRepository.existsById(DOCTOR_ID)).thenReturn(true);
+        when(slotRepository.findBookable(DOCTOR_ID, DAY_START, DAY_END, NOW)).thenReturn(List.of(slot));
+
+        List<AvailableSlotResponse> slots = service.listAvailableSlots(DOCTOR_ID, DAY);
+
+        ArgumentCaptor<List<SlotWindow>> windows = windowsCaptor();
+        verify(slotMaterializer).createMissing(eq(DOCTOR_ID), windows.capture());
+        assertThat(windows.getValue()).hasSize(16);
+        assertThat(slots)
+                .containsExactly(new AvailableSlotResponse(
+                        slot.getId(), DOCTOR_ID, DAY_START, DAY_START.plus(Duration.ofMinutes(30))));
+    }
+
+    @Test
+    @DisplayName("BOOK-02 a concurrent insert of the same slots is retried and then re-read")
+    void concurrentMaterialisationIsRetried() {
+        when(doctorRepository.existsById(DOCTOR_ID)).thenReturn(true);
+        doThrow(new DataIntegrityViolationException("uk_slot_doctor_start"))
+                .doNothing()
+                .when(slotMaterializer)
+                .createMissing(eq(DOCTOR_ID), anyList());
+        when(slotRepository.findBookable(DOCTOR_ID, DAY_START, DAY_END, NOW)).thenReturn(List.of());
+
+        List<AvailableSlotResponse> slots = service.listAvailableSlots(DOCTOR_ID, DAY);
+
+        verify(slotMaterializer, times(2)).createMissing(eq(DOCTOR_ID), anyList());
+        assertThat(slots).isEmpty();
+    }
+
+    @Test
+    @DisplayName("BOOK-10 confirming an own active hold returns the booked slot")
+    void confirmReturnsBookedSlot() {
+        Slot slot = withState(slot(DAY_START), SlotStatus.BOOKED, "patient-1", null);
+        when(slotRepository.confirm(slot.getId(), "patient-1", NOW)).thenReturn(1);
+        when(slotRepository.findById(slot.getId())).thenReturn(Optional.of(slot));
+
+        SlotResponse response = service.confirm(slot.getId(), "patient-1");
+
+        assertThat(response.status()).isEqualTo(SlotStatus.BOOKED);
+        assertThat(response.holdExpiresAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("BOOK-15 a successful confirm publishes a booking-confirmed event")
+    void confirmPublishesEvent() {
+        Slot slot = withState(slot(DAY_START), SlotStatus.BOOKED, "patient-1", null);
+        when(slotRepository.confirm(slot.getId(), "patient-1", NOW)).thenReturn(1);
+        when(slotRepository.findById(slot.getId())).thenReturn(Optional.of(slot));
+
+        service.confirm(slot.getId(), "patient-1");
+
+        verify(events).publishEvent(new BookingConfirmedEvent(slot.getId(), DOCTOR_ID, DAY_START));
+    }
+
+    @Test
+    @DisplayName("BOOK-15 a rejected confirm publishes no event")
+    void rejectedConfirmPublishesNothing() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.confirm(slotId, "patient-2", NOW)).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.confirm(slotId, "patient-2")).isInstanceOf(ConflictException.class);
+
+        verifyNoInteractions(events);
+    }
+
+    @Test
+    @DisplayName("BOOK-11 confirming without an own active hold raises hold-not-active")
+    void confirmWithoutActiveHoldIsConflict() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.confirm(slotId, "patient-2", NOW)).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.confirm(slotId, "patient-2"))
+                .isInstanceOf(ConflictException.class)
+                .extracting("type")
+                .isEqualTo("hold-not-active");
+    }
+
+    @Test
+    @DisplayName("BOOK-07 confirming a slot that does not exist raises not found")
+    void confirmUnknownSlotIsNotFound() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.confirm(slotId, "patient-1", NOW)).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.confirm(slotId, "patient-1")).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("BOOK-13 cancelling an own booking returns the freed slot")
+    void cancelReturnsFreedSlot() {
+        Slot slot = slot(DAY_START);
+        when(slotRepository.cancel(slot.getId(), "patient-1")).thenReturn(1);
+        when(slotRepository.findById(slot.getId())).thenReturn(Optional.of(slot));
+
+        SlotResponse response = service.cancel(slot.getId(), "patient-1");
+
+        assertThat(response.status()).isEqualTo(SlotStatus.AVAILABLE);
+        assertThat(response.patientId()).isNull();
+    }
+
+    @Test
+    @DisplayName("BOOK-14 cancelling a slot not booked by the patient raises booking-not-cancellable")
+    void cancelOthersBookingIsConflict() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.cancel(slotId, "patient-2")).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.cancel(slotId, "patient-2"))
+                .isInstanceOf(ConflictException.class)
+                .extracting("type")
+                .isEqualTo("booking-not-cancellable");
+    }
+
+    @Test
+    @DisplayName("BOOK-07 cancelling a slot that does not exist raises not found")
+    void cancelUnknownSlotIsNotFound() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.cancel(slotId, "patient-1")).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.cancel(slotId, "patient-1")).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("BOOK-12 releasing expired holds uses the current time")
+    void releaseExpiredHoldsUsesClock() {
+        when(slotRepository.releaseExpiredHolds(NOW)).thenReturn(3);
+
+        int released = service.releaseExpiredHolds();
+
+        assertThat(released).isEqualTo(3);
+    }
+
+    static Slot slot(Instant start) {
+        Slot slot = Slot.available(DOCTOR_ID, start, start.plus(Duration.ofMinutes(30)));
+        ReflectionTestUtils.setField(slot, "id", UUID.randomUUID());
+        return slot;
+    }
+
+    static Slot withState(Slot slot, SlotStatus status, String patientId, Instant holdExpiresAt) {
+        ReflectionTestUtils.setField(slot, "status", status);
+        ReflectionTestUtils.setField(slot, "patientId", patientId);
+        ReflectionTestUtils.setField(slot, "holdExpiresAt", holdExpiresAt);
+        return slot;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ArgumentCaptor<List<SlotWindow>> windowsCaptor() {
+        return ArgumentCaptor.forClass(List.class);
+    }
+}

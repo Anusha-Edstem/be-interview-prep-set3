@@ -28,6 +28,13 @@ management:
     health:
       probes:
         enabled: true
+booking:
+  slot-length: 30m
+  hold-duration: 5m
+  day-start: "09:00"
+  day-end: "17:00"
+  zone: UTC
+  expiry-sweep-interval: 30s
 rate-limit:
   max-requests: 10
   window: 1m

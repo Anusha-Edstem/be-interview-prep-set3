@@ -176,7 +176,7 @@ class RateLimitIntegrationTest {
                 .map(FixedDelayTask.class::cast)
                 .toList();
 
-        assertThat(sweeps).extracting(FixedDelayTask::getIntervalDuration).containsExactly(properties.window());
+        assertThat(sweeps).extracting(FixedDelayTask::getIntervalDuration).contains(properties.window());
     }
 
     @Test
