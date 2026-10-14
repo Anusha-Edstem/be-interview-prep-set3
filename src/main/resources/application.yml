@@ -11,6 +11,10 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      max-file-size: 6MB
+      max-request-size: 7MB
 server:
   error:
     include-stacktrace: never
@@ -29,3 +33,6 @@ rate-limit:
   window: 1m
   paths:
     - /api/v1/quotes/**
+file-storage:
+  location: ./storage
+  max-file-size: 5MB
