@@ -23,8 +23,8 @@ class ConcurrentBookingIntegrationTest extends BookingIntegrationTestSupport {
     private static final int PATIENTS = 20;
 
     @Test
-    @DisplayName("BOOK-09 twenty patients holding the same slot at the same moment yield exactly one hold")
-    void exactlyOnePatientWinsTheSlot() throws Exception {
+    @DisplayName("BOOK-09 twenty patients booking the same slot at the same moment yield exactly one booking")
+    void exactlyOnePatientBooksTheSlot() throws Exception {
         UUID slotId = firstAvailableSlot();
         ExecutorService pool = Executors.newFixedThreadPool(PATIENTS);
         CountDownLatch ready = new CountDownLatch(PATIENTS);
@@ -35,11 +35,11 @@ class ConcurrentBookingIntegrationTest extends BookingIntegrationTestSupport {
             futures.add(pool.submit(() -> {
                 ready.countDown();
                 go.await();
-                return new Attempt(patientId, post("hold", slotId, patientId));
+                return book(slotId, patientId);
             }));
         }
 
-        ready.await(10, TimeUnit.SECONDS);
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
         go.countDown();
         List<Attempt> attempts = new ArrayList<>();
         for (Future<Attempt> future : futures) {
@@ -47,25 +47,34 @@ class ConcurrentBookingIntegrationTest extends BookingIntegrationTestSupport {
         }
         pool.shutdown();
 
-        List<Attempt> winners = attempts.stream().filter(Attempt::succeeded).toList();
-        List<Attempt> conflicts = attempts.stream()
-                .filter(attempt -> attempt.response().getStatusCode().isSameCodeAs(HttpStatus.CONFLICT))
-                .toList();
+        List<Attempt> winners = attempts.stream().filter(Attempt::booked).toList();
+        List<Attempt> rejected = attempts.stream().filter(Attempt::rejected).toList();
         assertThat(winners).hasSize(1);
-        assertThat(conflicts).hasSize(PATIENTS - 1);
-        assertThat(conflicts)
+        assertThat(rejected).hasSize(PATIENTS - 1);
+        assertThat(rejected)
                 .allSatisfy(attempt -> assertThat(
-                                attempt.response().getBody().get("type").asText())
+                                attempt.hold().getBody().get("type").asText())
                         .endsWith("/slot-unavailable"));
         Slot stored = slotRepository.findById(slotId).orElseThrow();
-        assertThat(stored.getStatus()).isEqualTo(SlotStatus.HELD);
+        assertThat(stored.getStatus()).isEqualTo(SlotStatus.BOOKED);
         assertThat(stored.getPatientId()).isEqualTo(winners.get(0).patientId());
     }
 
-    private record Attempt(String patientId, ResponseEntity<JsonNode> response) {
+    private Attempt book(UUID slotId, String patientId) {
+        ResponseEntity<JsonNode> hold = post("hold", slotId, patientId);
+        ResponseEntity<JsonNode> confirm =
+                hold.getStatusCode().isSameCodeAs(HttpStatus.OK) ? post("confirm", slotId, patientId) : null;
+        return new Attempt(patientId, hold, confirm);
+    }
 
-        boolean succeeded() {
-            return response.getStatusCode().isSameCodeAs(HttpStatus.OK);
+    private record Attempt(String patientId, ResponseEntity<JsonNode> hold, ResponseEntity<JsonNode> confirm) {
+
+        boolean booked() {
+            return confirm != null && confirm.getStatusCode().isSameCodeAs(HttpStatus.OK);
+        }
+
+        boolean rejected() {
+            return hold.getStatusCode().isSameCodeAs(HttpStatus.CONFLICT);
         }
     }
 }

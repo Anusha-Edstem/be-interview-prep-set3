@@ -90,6 +90,54 @@ class SlotRepositoryTest {
     }
 
     @Test
+    @DisplayName("BOOK-10 the holder confirming an active hold books the slot")
+    void confirmActiveHold() {
+        Slot slot = freeSlot(NINE);
+        slotRepository.hold(slot.getId(), "patient-1", NOW, NOW.plus(HOLD));
+
+        int updated = slotRepository.confirm(slot.getId(), "patient-1", NOW.plusSeconds(60));
+
+        Slot reloaded = slotRepository.findById(slot.getId()).orElseThrow();
+        assertThat(updated).isEqualTo(1);
+        assertThat(reloaded.getStatus()).isEqualTo(SlotStatus.BOOKED);
+        assertThat(reloaded.getPatientId()).isEqualTo("patient-1");
+        assertThat(reloaded.getHoldExpiresAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("BOOK-11 a confirm by another patient, after expiry, or without a hold updates nothing")
+    void confirmRequiresOwnActiveHold() {
+        Slot free = freeSlot(NINE);
+        Slot held = freeSlot(NINE.plus(SLOT));
+        slotRepository.hold(held.getId(), "patient-1", NOW, NOW.plus(HOLD));
+
+        int byOtherPatient = slotRepository.confirm(held.getId(), "patient-2", NOW.plusSeconds(60));
+        int atExpiry = slotRepository.confirm(held.getId(), "patient-1", NOW.plus(HOLD));
+        int withoutHold = slotRepository.confirm(free.getId(), "patient-1", NOW);
+
+        assertThat(byOtherPatient).isZero();
+        assertThat(atExpiry).isZero();
+        assertThat(withoutHold).isZero();
+        assertThat(slotRepository.findById(held.getId()).orElseThrow().getStatus())
+                .isEqualTo(SlotStatus.HELD);
+    }
+
+    @Test
+    @DisplayName("BOOK-08 a booked slot cannot be held again")
+    void bookedSlotCannotBeHeld() {
+        Slot slot = freeSlot(NINE);
+        slotRepository.hold(slot.getId(), "patient-1", NOW, NOW.plus(HOLD));
+        slotRepository.confirm(slot.getId(), "patient-1", NOW);
+        Instant muchLater = NOW.plus(Duration.ofHours(1));
+
+        int updated = slotRepository.hold(slot.getId(), "patient-2", muchLater, muchLater.plus(HOLD));
+
+        assertThat(updated).isZero();
+        assertThat(slotRepository.findById(slot.getId()).orElseThrow().getPatientId())
+                .isEqualTo("patient-1");
+    }
+
+    @Test
     @DisplayName("BOOK-07 a hold on a slot that does not exist updates nothing")
     void holdUnknownSlotUpdatesNothing() {
         int updated = slotRepository.hold(UUID.randomUUID(), "patient-1", NOW, NOW.plus(HOLD));

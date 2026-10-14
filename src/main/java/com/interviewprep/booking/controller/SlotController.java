@@ -25,4 +25,9 @@ public class SlotController {
     public SlotResponse hold(@PathVariable UUID slotId, @Valid @RequestBody PatientRequest request) {
         return bookingService.hold(slotId, request.patientId());
     }
+
+    @PostMapping("/{slotId}/confirm")
+    public SlotResponse confirm(@PathVariable UUID slotId, @Valid @RequestBody PatientRequest request) {
+        return bookingService.confirm(slotId, request.patientId());
+    }
 }

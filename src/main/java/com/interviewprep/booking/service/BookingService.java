@@ -88,6 +88,19 @@ public class BookingService {
         return mapper.toResponse(load(slotId));
     }
 
+    @Transactional
+    public SlotResponse confirm(UUID slotId, String patientId) {
+        int confirmed = slotRepository.confirm(slotId, patientId, now());
+        if (confirmed == 0) {
+            requireExists(slotId);
+            throw new ConflictException(
+                    "hold-not-active",
+                    "Hold not active",
+                    "The slot is not held by this patient or the hold has expired");
+        }
+        return mapper.toResponse(load(slotId));
+    }
+
     private void ensureSlotsExist(UUID doctorId, List<SlotWindow> windows) {
         try {
             slotMaterializer.createMissing(doctorId, windows);

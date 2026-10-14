@@ -1,5 +1,6 @@
 package com.interviewprep.booking.controller;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -104,6 +105,47 @@ class SlotControllerTest {
                 .andExpect(jsonPath("$.type").value("https://be-interview-prep/problems/slot-unavailable"))
                 .andExpect(jsonPath("$.title").value("Slot unavailable"))
                 .andExpect(jsonPath("$.status").value(409));
+    }
+
+    @Test
+    @DisplayName("BOOK-10 confirming an own hold returns the booked slot")
+    void confirmReturnsBookedSlot() throws Exception {
+        when(bookingService.confirm(SLOT_ID, "patient-1"))
+                .thenReturn(new SlotResponse(SLOT_ID, DOCTOR_ID, START, END, SlotStatus.BOOKED, "patient-1", null));
+
+        perform("confirm", SLOT_ID.toString(), PATIENT_BODY)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("BOOKED"))
+                .andExpect(jsonPath("$.patientId").value("patient-1"))
+                .andExpect(jsonPath("$.holdExpiresAt").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("BOOK-11 confirming without an active hold is a 409 hold-not-active problem")
+    void confirmWithoutHoldIsConflict() throws Exception {
+        when(bookingService.confirm(SLOT_ID, "patient-1"))
+                .thenThrow(new ConflictException("hold-not-active", "Hold not active", "The hold has expired"));
+
+        perform("confirm", SLOT_ID.toString(), PATIENT_BODY)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("https://be-interview-prep/problems/hold-not-active"))
+                .andExpect(jsonPath("$.status").value(409));
+    }
+
+    @Test
+    @DisplayName("BOOK-06 confirm validates the patient id")
+    void confirmValidatesBody() throws Exception {
+        perform("confirm", SLOT_ID.toString(), "{}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("patientId"));
+    }
+
+    @Test
+    @DisplayName("BOOK-07 confirming an unknown slot is a 404 problem")
+    void confirmUnknownSlotIsNotFound() throws Exception {
+        when(bookingService.confirm(SLOT_ID, "patient-1")).thenThrow(new NotFoundException("Slot", SLOT_ID));
+
+        perform("confirm", SLOT_ID.toString(), PATIENT_BODY).andExpect(status().isNotFound());
     }
 
     private ResultActions perform(String action, String slotId, String body) throws Exception {

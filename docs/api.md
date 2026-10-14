@@ -35,7 +35,9 @@ _Pending._
 | GET | `/api/v1/doctors/{doctorId}/slots` | none | missing or malformed `date`, malformed `doctorId` | `400` problem detail | BOOK-03 |
 | GET | `/api/v1/doctors/{doctorId}/slots` | none | unknown `doctorId` | `404` problem detail | BOOK-04 |
 | POST | `/api/v1/slots/{slotId}/hold` | none (patient id in body) | `{"patientId": "<1-64 chars>"}` | `200 {slotId, doctorId, startTime, endTime, status: "HELD", patientId, holdExpiresAt}` — held for 5 minutes | BOOK-05 |
-| POST | `/api/v1/slots/{slotId}/hold` | none | blank or missing `patientId`, missing body, malformed `slotId` | `400` problem detail (`validation-failed` with field errors, or `bad-request`) | BOOK-06 |
-| POST | `/api/v1/slots/{slotId}/hold` | none | unknown `slotId` | `404` problem detail | BOOK-07 |
+| POST | `/api/v1/slots/{slotId}/hold`, `/confirm` | none | blank or missing `patientId`, missing body, malformed `slotId` | `400` problem detail (`validation-failed` with field errors, or `bad-request`) | BOOK-06 |
+| POST | `/api/v1/slots/{slotId}/hold`, `/confirm` | none | unknown `slotId` | `404` problem detail | BOOK-07 |
 | POST | `/api/v1/slots/{slotId}/hold` | none | slot actively held or booked | `409` problem detail, type `slot-unavailable` | BOOK-08 |
-| POST | `/api/v1/slots/{slotId}/hold` | none | 20 patients at the same moment | exactly one `200`, nineteen `409 slot-unavailable` | BOOK-09 |
+| POST | `/api/v1/slots/{slotId}/hold` then `/confirm` | none | 20 patients holding and confirming the same slot at the same moment | exactly one booking; nineteen `409 slot-unavailable` on hold | BOOK-09 |
+| POST | `/api/v1/slots/{slotId}/confirm` | none (patient id in body) | `{"patientId"}` of the patient holding the slot, before the hold expires | `200 {…, status: "BOOKED", holdExpiresAt: null}` | BOOK-10 |
+| POST | `/api/v1/slots/{slotId}/confirm` | none | hold expired, held by another patient, or slot not held | `409` problem detail, type `hold-not-active` | BOOK-11 |

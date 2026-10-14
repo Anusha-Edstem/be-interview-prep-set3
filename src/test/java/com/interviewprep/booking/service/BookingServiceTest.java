@@ -185,6 +185,42 @@ class BookingServiceTest {
         assertThat(slots).isEmpty();
     }
 
+    @Test
+    @DisplayName("BOOK-10 confirming an own active hold returns the booked slot")
+    void confirmReturnsBookedSlot() {
+        Slot slot = withState(slot(DAY_START), SlotStatus.BOOKED, "patient-1", null);
+        when(slotRepository.confirm(slot.getId(), "patient-1", NOW)).thenReturn(1);
+        when(slotRepository.findById(slot.getId())).thenReturn(Optional.of(slot));
+
+        SlotResponse response = service.confirm(slot.getId(), "patient-1");
+
+        assertThat(response.status()).isEqualTo(SlotStatus.BOOKED);
+        assertThat(response.holdExpiresAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("BOOK-11 confirming without an own active hold raises hold-not-active")
+    void confirmWithoutActiveHoldIsConflict() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.confirm(slotId, "patient-2", NOW)).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.confirm(slotId, "patient-2"))
+                .isInstanceOf(ConflictException.class)
+                .extracting("type")
+                .isEqualTo("hold-not-active");
+    }
+
+    @Test
+    @DisplayName("BOOK-07 confirming a slot that does not exist raises not found")
+    void confirmUnknownSlotIsNotFound() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.confirm(slotId, "patient-1", NOW)).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.confirm(slotId, "patient-1")).isInstanceOf(NotFoundException.class);
+    }
+
     static Slot slot(Instant start) {
         Slot slot = Slot.available(DOCTOR_ID, start, start.plus(Duration.ofMinutes(30)));
         ReflectionTestUtils.setField(slot, "id", UUID.randomUUID());
