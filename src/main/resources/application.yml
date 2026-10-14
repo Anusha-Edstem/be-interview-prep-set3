@@ -11,6 +11,10 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      max-file-size: 6MB
+      max-request-size: 7MB
 server:
   error:
     include-stacktrace: never
@@ -24,3 +28,6 @@ management:
     health:
       probes:
         enabled: true
+file-storage:
+  location: ./storage
+  max-file-size: 5MB
