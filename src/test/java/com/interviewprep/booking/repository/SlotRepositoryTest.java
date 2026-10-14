@@ -138,6 +138,31 @@ class SlotRepositoryTest {
     }
 
     @Test
+    @DisplayName("BOOK-12 the sweep frees expired holds only, leaving active holds and bookings")
+    void releaseExpiredHoldsOnly() {
+        Slot expired = freeSlot(NINE);
+        Slot active = freeSlot(NINE.plus(SLOT));
+        Slot booked = freeSlot(NINE.plus(SLOT.multipliedBy(2)));
+        slotRepository.hold(expired.getId(), "patient-1", NOW, NOW.plus(HOLD));
+        slotRepository.hold(booked.getId(), "patient-3", NOW, NOW.plus(HOLD));
+        slotRepository.confirm(booked.getId(), "patient-3", NOW);
+        Instant sweepAt = NOW.plus(HOLD).plusSeconds(1);
+        slotRepository.hold(active.getId(), "patient-2", sweepAt, sweepAt.plus(HOLD));
+
+        int released = slotRepository.releaseExpiredHolds(sweepAt);
+
+        assertThat(released).isEqualTo(1);
+        Slot freed = slotRepository.findById(expired.getId()).orElseThrow();
+        assertThat(freed.getStatus()).isEqualTo(SlotStatus.AVAILABLE);
+        assertThat(freed.getPatientId()).isNull();
+        assertThat(freed.getHoldExpiresAt()).isNull();
+        assertThat(slotRepository.findById(active.getId()).orElseThrow().getStatus())
+                .isEqualTo(SlotStatus.HELD);
+        assertThat(slotRepository.findById(booked.getId()).orElseThrow().getStatus())
+                .isEqualTo(SlotStatus.BOOKED);
+    }
+
+    @Test
     @DisplayName("BOOK-07 a hold on a slot that does not exist updates nothing")
     void holdUnknownSlotUpdatesNothing() {
         int updated = slotRepository.hold(UUID.randomUUID(), "patient-1", NOW, NOW.plus(HOLD));

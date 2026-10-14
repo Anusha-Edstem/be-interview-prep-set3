@@ -101,6 +101,11 @@ public class BookingService {
         return mapper.toResponse(load(slotId));
     }
 
+    @Transactional
+    public int releaseExpiredHolds() {
+        return slotRepository.releaseExpiredHolds(now());
+    }
+
     private void ensureSlotsExist(UUID doctorId, List<SlotWindow> windows) {
         try {
             slotMaterializer.createMissing(doctorId, windows);

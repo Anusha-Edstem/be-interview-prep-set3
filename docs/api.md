@@ -41,3 +41,4 @@ _Pending._
 | POST | `/api/v1/slots/{slotId}/hold` then `/confirm` | none | 20 patients holding and confirming the same slot at the same moment | exactly one booking; nineteen `409 slot-unavailable` on hold | BOOK-09 |
 | POST | `/api/v1/slots/{slotId}/confirm` | none (patient id in body) | `{"patientId"}` of the patient holding the slot, before the hold expires | `200 {…, status: "BOOKED", holdExpiresAt: null}` | BOOK-10 |
 | POST | `/api/v1/slots/{slotId}/confirm` | none | hold expired, held by another patient, or slot not held | `409` problem detail, type `hold-not-active` | BOOK-11 |
+| — | scheduled, every `booking.expiry-sweep-interval` | — | an unconfirmed hold older than 5 minutes | the slot is listed and holdable again at once (lazy expiry); the sweep resets it to `AVAILABLE` in the table; a late confirm is `409 hold-not-active` | BOOK-12 |

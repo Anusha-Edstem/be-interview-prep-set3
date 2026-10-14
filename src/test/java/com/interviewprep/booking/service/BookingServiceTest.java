@@ -221,6 +221,16 @@ class BookingServiceTest {
         assertThatThrownBy(() -> service.confirm(slotId, "patient-1")).isInstanceOf(NotFoundException.class);
     }
 
+    @Test
+    @DisplayName("BOOK-12 releasing expired holds uses the current time")
+    void releaseExpiredHoldsUsesClock() {
+        when(slotRepository.releaseExpiredHolds(NOW)).thenReturn(3);
+
+        int released = service.releaseExpiredHolds();
+
+        assertThat(released).isEqualTo(3);
+    }
+
     static Slot slot(Instant start) {
         Slot slot = Slot.available(DOCTOR_ID, start, start.plus(Duration.ofMinutes(30)));
         ReflectionTestUtils.setField(slot, "id", UUID.randomUUID());

@@ -61,4 +61,16 @@ public interface SlotRepository extends JpaRepository<Slot, UUID> {
               and s.holdExpiresAt > :now
             """)
     int confirm(@Param("slotId") UUID slotId, @Param("patientId") String patientId, @Param("now") Instant now);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Slot s
+            set s.status = com.interviewprep.booking.entity.SlotStatus.AVAILABLE,
+                s.patientId = null,
+                s.holdExpiresAt = null,
+                s.version = s.version + 1
+            where s.status = com.interviewprep.booking.entity.SlotStatus.HELD
+              and s.holdExpiresAt <= :now
+            """)
+    int releaseExpiredHolds(@Param("now") Instant now);
 }
