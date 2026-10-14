@@ -7,7 +7,7 @@ Five Spring Boot features, each delivered as its own branch, pull request and me
 | 1 | Library API | [#6](https://github.com/Anusha-Edstem/be-interview-prep-set3/pull/6) |
 | 2 | Expense Tracker | [#7](https://github.com/Anusha-Edstem/be-interview-prep-set3/pull/7) |
 | 3 | File Upload Service | [#8](https://github.com/Anusha-Edstem/be-interview-prep-set3/pull/8) |
-| 4 | API Rate Limiting | _pending_ |
+| 4 | API Rate Limiting | [#9](https://github.com/Anusha-Edstem/be-interview-prep-set3/pull/9) |
 | 5 | Appointment Booking | [#10](https://github.com/Anusha-Edstem/be-interview-prep-set3/pull/10) |
 
 **Video:** _to be added after the last merge_
