@@ -4,11 +4,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.SchedulingConfigurer;
+import org.springframework.scheduling.config.ScheduledTaskRegistrar;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
-public class RateLimitConfig implements WebMvcConfigurer {
+@EnableScheduling
+public class RateLimitConfig implements WebMvcConfigurer, SchedulingConfigurer {
 
     private final RateLimitProperties properties;
     private final Clock clock;
@@ -29,5 +33,10 @@ public class RateLimitConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new RateLimitInterceptor(slidingWindowRateLimiter(), objectMapper))
                 .addPathPatterns(properties.paths());
+    }
+
+    @Override
+    public void configureTasks(ScheduledTaskRegistrar registrar) {
+        registrar.addFixedDelayTask(slidingWindowRateLimiter()::evictIdleKeys, properties.window());
     }
 }

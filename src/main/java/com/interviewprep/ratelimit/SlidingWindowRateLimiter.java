@@ -38,6 +38,20 @@ public class SlidingWindowRateLimiter {
         return decision.get();
     }
 
+    public void evictIdleKeys() {
+        Instant now = clock.instant();
+        requestLogs
+                .keySet()
+                .forEach(key -> requestLogs.computeIfPresent(key, (ignored, timestamps) -> {
+                    evictExpired(timestamps, now);
+                    return timestamps.isEmpty() ? null : timestamps;
+                }));
+    }
+
+    int trackedKeyCount() {
+        return requestLogs.size();
+    }
+
     private RateLimitDecision admit(Deque<Instant> timestamps, Instant now) {
         if (timestamps.size() >= maxRequests) {
             return RateLimitDecision.reject(secondsUntilSlotFrees(timestamps.peekFirst(), now));

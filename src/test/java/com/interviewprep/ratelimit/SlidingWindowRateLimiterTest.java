@@ -120,6 +120,33 @@ class SlidingWindowRateLimiterTest {
         assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
     }
 
+    @Test
+    @DisplayName("RL-07 keys with no request left in the window are dropped")
+    void idleKeysEvicted() {
+        acquire("idle-client", 3);
+        clock.advance(Duration.ofSeconds(30));
+        acquire("active-client", 1);
+        clock.advance(Duration.ofSeconds(30));
+
+        limiter.evictIdleKeys();
+
+        assertThat(limiter.trackedKeyCount()).isEqualTo(1);
+        assertThat(limiter.tryAcquire("active-client").remaining()).isEqualTo(MAX_REQUESTS - 2);
+    }
+
+    @Test
+    @DisplayName("RL-07 an evicted key starts again with the full limit")
+    void evictedKeyStartsFresh() {
+        acquire("client-a", MAX_REQUESTS);
+        clock.advance(WINDOW);
+
+        limiter.evictIdleKeys();
+        RateLimitDecision decision = limiter.tryAcquire("client-a");
+
+        assertThat(decision.allowed()).isTrue();
+        assertThat(decision.remaining()).isEqualTo(MAX_REQUESTS - 1);
+    }
+
     private List<RateLimitDecision> acquire(String key, int count) {
         return IntStream.range(0, count).mapToObj(i -> limiter.tryAcquire(key)).toList();
     }

@@ -16,6 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +25,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.scheduling.config.FixedDelayTask;
+import org.springframework.scheduling.config.ScheduledTask;
+import org.springframework.scheduling.config.ScheduledTaskHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
@@ -42,6 +46,18 @@ class RateLimitIntegrationTest {
 
     @Autowired
     private MutableClock clock;
+
+    @Autowired
+    private RateLimitProperties properties;
+
+    @Autowired
+    private ScheduledTaskHolder scheduledTaskHolder;
+
+    @BeforeEach
+    void resetLimiter() {
+        clock.advance(properties.window());
+        limiter.evictIdleKeys();
+    }
 
     @Test
     @DisplayName("RL-02 ten requests succeed and the eleventh in the same minute is rejected with 429")
@@ -149,6 +165,28 @@ class RateLimitIntegrationTest {
         assertThat(allowed).isEqualTo(10);
         assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
         requestQuote(apiKey).andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    @DisplayName("RL-07 idle keys are swept on a schedule that follows the configured window")
+    void idleKeySweepScheduled() {
+        List<FixedDelayTask> sweeps = scheduledTaskHolder.getScheduledTasks().stream()
+                .map(ScheduledTask::getTask)
+                .filter(FixedDelayTask.class::isInstance)
+                .map(FixedDelayTask.class::cast)
+                .toList();
+
+        assertThat(sweeps).extracting(FixedDelayTask::getIntervalDuration).containsExactly(properties.window());
+    }
+
+    @Test
+    @DisplayName("RL-07 resetting between tests leaves no tracked key behind")
+    void resetLeavesNoTrackedKeys() throws Exception {
+        requestQuote(uniqueKey()).andExpect(status().isOk());
+
+        resetLimiter();
+
+        assertThat(limiter.trackedKeyCount()).isZero();
     }
 
     private ResultActions requestQuote(String apiKey) throws Exception {
