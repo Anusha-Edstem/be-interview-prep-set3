@@ -1,6 +1,7 @@
 package com.interviewprep.file.service;
 
 import com.interviewprep.file.config.FileStorageProperties;
+import com.interviewprep.file.dto.FileDownload;
 import com.interviewprep.file.dto.StoredFileResponse;
 import com.interviewprep.file.entity.StoredFile;
 import com.interviewprep.file.error.EmptyFileException;
@@ -10,9 +11,14 @@ import com.interviewprep.file.error.UnsupportedFileTypeException;
 import com.interviewprep.file.mapper.StoredFileMapper;
 import com.interviewprep.file.repository.StoredFileRepository;
 import com.interviewprep.file.store.FileStorage;
+import com.interviewprep.shared.error.NotFoundException;
+import com.interviewprep.shared.web.PageResponse;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.unit.DataSize;
@@ -21,6 +27,10 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 @Transactional
 public class FileService {
+
+    public static final int MAX_PAGE_SIZE = 100;
+
+    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("uploadedAt"), Sort.Order.desc("id"));
 
     private final StoredFileRepository repository;
     private final FileStorage storage;
@@ -53,6 +63,35 @@ public class FileService {
         storage.write(storedName, file);
         StoredFile saved = saveOrDiscard(new StoredFile(originalName, storedName, type.mediaType(), file.getSize()));
         return mapper.toResponse(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<StoredFileResponse> list(Pageable pageable) {
+        Pageable newestFirst =
+                PageRequest.of(pageable.getPageNumber(), Math.min(pageable.getPageSize(), MAX_PAGE_SIZE), NEWEST_FIRST);
+        return PageResponse.of(repository.findAll(newestFirst), mapper::toResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public StoredFileResponse get(UUID id) {
+        return mapper.toResponse(find(id));
+    }
+
+    @Transactional(readOnly = true)
+    public FileDownload download(UUID id) {
+        StoredFile file = find(id);
+        return mapper.toDownload(file, storage.read(file.getStoredName()));
+    }
+
+    public void delete(UUID id) {
+        StoredFile file = find(id);
+        repository.delete(file);
+        repository.flush();
+        storage.delete(file.getStoredName());
+    }
+
+    private StoredFile find(UUID id) {
+        return repository.findById(id).orElseThrow(() -> new NotFoundException("File", id));
     }
 
     private FileType detectType(MultipartFile file) {

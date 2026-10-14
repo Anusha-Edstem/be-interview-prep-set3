@@ -3,12 +3,14 @@ package com.interviewprep.file.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.interviewprep.file.FileFixtures;
 import com.interviewprep.file.config.FileStorageProperties;
+import com.interviewprep.file.dto.FileDownload;
 import com.interviewprep.file.dto.StoredFileResponse;
 import com.interviewprep.file.entity.StoredFile;
 import com.interviewprep.file.error.EmptyFileException;
@@ -17,11 +19,14 @@ import com.interviewprep.file.error.UnsupportedFileTypeException;
 import com.interviewprep.file.mapper.StoredFileMapper;
 import com.interviewprep.file.repository.StoredFileRepository;
 import com.interviewprep.file.store.FileStorage;
+import com.interviewprep.shared.error.NotFoundException;
+import com.interviewprep.shared.web.PageResponse;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,7 +37,12 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.util.unit.DataSize;
@@ -50,13 +60,95 @@ class FileServiceTest {
     private StoredFileRepository repository;
 
     private Path root;
+    private FileStorage storage;
     private FileService service;
 
     @BeforeEach
     void setUp() {
         root = tempDir.resolve("storage").toAbsolutePath().normalize();
         FileStorageProperties properties = new FileStorageProperties(root.toString(), DataSize.ofMegabytes(5));
-        service = new FileService(repository, new FileStorage(properties), new StoredFileMapper(), properties);
+        storage = new FileStorage(properties);
+        service = new FileService(repository, storage, new StoredFileMapper(), properties);
+    }
+
+    @Test
+    @DisplayName("FILE-06 list caps the page size at 100 and orders newest first")
+    void listCapsPageSizeAndSortsNewestFirst() {
+        StoredFile file = FileFixtures.storedFile(UUID.randomUUID(), "a.png", "image/png", 64);
+        when(repository.findAll(any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(file), invocation.getArgument(0), 1));
+
+        PageResponse<StoredFileResponse> page = service.list(PageRequest.of(2, 500, Sort.by("originalName")));
+
+        ArgumentCaptor<Pageable> requested = ArgumentCaptor.forClass(Pageable.class);
+        verify(repository).findAll(requested.capture());
+        assertThat(requested.getValue().getPageNumber()).isEqualTo(2);
+        assertThat(requested.getValue().getPageSize()).isEqualTo(FileService.MAX_PAGE_SIZE);
+        assertThat(requested.getValue().getSort())
+                .containsExactly(Sort.Order.desc("uploadedAt"), Sort.Order.desc("id"));
+        assertThat(page.size()).isEqualTo(100);
+        assertThat(page.content()).extracting(StoredFileResponse::originalName).containsExactly("a.png");
+    }
+
+    @Test
+    @DisplayName("FILE-07 metadata of an unknown file raises not found")
+    void getUnknownFile() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.get(id))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("File " + id + " was not found");
+    }
+
+    @Test
+    @DisplayName("FILE-08 download returns the stored bytes with the original name and detected type")
+    void downloadReturnsStoredContent() throws IOException {
+        byte[] content = FileFixtures.pdf();
+        StoredFile file = FileFixtures.storedFile(UUID.randomUUID(), "report.pdf", "application/pdf", content.length);
+        storage.write(file.getStoredName(), new ByteArrayResource(content));
+        when(repository.findById(file.getId())).thenReturn(Optional.of(file));
+
+        FileDownload download = service.download(file.getId());
+
+        assertThat(download.originalName()).isEqualTo("report.pdf");
+        assertThat(download.contentType()).isEqualTo("application/pdf");
+        assertThat(download.size()).isEqualTo(content.length);
+        assertThat(download.content().getContentAsByteArray()).isEqualTo(content);
+    }
+
+    @Test
+    @DisplayName("FILE-08 download of an unknown file raises not found")
+    void downloadUnknownFile() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.download(id)).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("FILE-09 delete removes both the record and the stored content")
+    void deleteRemovesRecordAndContent() throws IOException {
+        StoredFile file = FileFixtures.storedFile(UUID.randomUUID(), "a.png", "image/png", 64);
+        storage.write(file.getStoredName(), new ByteArrayResource(FileFixtures.png()));
+        when(repository.findById(file.getId())).thenReturn(Optional.of(file));
+
+        service.delete(file.getId());
+
+        verify(repository).delete(file);
+        verify(repository).flush();
+        assertThat(storedFiles()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("FILE-09 deleting an unknown file raises not found and deletes nothing")
+    void deleteUnknownFile() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.delete(id)).isInstanceOf(NotFoundException.class);
+
+        verify(repository, never()).delete(any(StoredFile.class));
     }
 
     @Test

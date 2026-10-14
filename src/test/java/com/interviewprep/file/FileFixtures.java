@@ -1,9 +1,15 @@
 package com.interviewprep.file;
 
+import com.interviewprep.file.entity.StoredFile;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Arrays;
+import java.util.UUID;
+import org.springframework.test.util.ReflectionTestUtils;
 
 public final class FileFixtures {
+
+    public static final Instant UPLOADED_AT = Instant.parse("2026-10-14T09:30:00Z");
 
     public static final byte[] PNG_SIGNATURE = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
 
@@ -27,6 +33,13 @@ public final class FileFixtures {
 
     public static byte[] windowsExecutable() {
         return withSignature(new byte[] {0x4D, 0x5A, (byte) 0x90, 0x00, 0x03, 0x00, 0x00, 0x00}, 64);
+    }
+
+    public static StoredFile storedFile(UUID id, String originalName, String contentType, long size) {
+        StoredFile file = new StoredFile(originalName, UUID.randomUUID().toString(), contentType, size);
+        ReflectionTestUtils.setField(file, "id", id);
+        ReflectionTestUtils.setField(file, "uploadedAt", UPLOADED_AT);
+        return file;
     }
 
     private static byte[] withSignature(byte[] signature, int size) {
