@@ -1,16 +1,19 @@
 package com.interviewprep.expense.service;
 
+import com.interviewprep.expense.dto.ExpenseFilter;
 import com.interviewprep.expense.dto.ExpenseRequest;
 import com.interviewprep.expense.dto.ExpenseResponse;
 import com.interviewprep.expense.entity.Expense;
 import com.interviewprep.expense.mapper.ExpenseMapper;
 import com.interviewprep.expense.repository.ExpenseRepository;
+import com.interviewprep.expense.repository.ExpenseSpecifications;
 import com.interviewprep.shared.error.NotFoundException;
 import com.interviewprep.shared.web.PageResponse;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,8 +40,12 @@ public class ExpenseService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<ExpenseResponse> list(Pageable requested) {
-        return PageResponse.of(repository.findAll(newestFirstCapped(requested)), mapper::toResponse);
+    public PageResponse<ExpenseResponse> list(ExpenseFilter filter, Pageable requested) {
+        if (filter.hasInvertedRange()) {
+            throw new InvalidDateRangeException(filter.from(), filter.to());
+        }
+        Specification<Expense> matching = ExpenseSpecifications.matching(filter.from(), filter.to(), filter.category());
+        return PageResponse.of(repository.findAll(matching, newestFirstCapped(requested)), mapper::toResponse);
     }
 
     @Transactional(readOnly = true)

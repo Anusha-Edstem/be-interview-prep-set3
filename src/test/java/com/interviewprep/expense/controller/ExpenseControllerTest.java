@@ -16,10 +16,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.interviewprep.expense.dto.ExpenseFilter;
 import com.interviewprep.expense.dto.ExpenseRequest;
 import com.interviewprep.expense.dto.ExpenseResponse;
 import com.interviewprep.expense.entity.ExpenseCategory;
 import com.interviewprep.expense.service.ExpenseService;
+import com.interviewprep.expense.service.InvalidDateRangeException;
 import com.interviewprep.shared.error.NotFoundException;
 import com.interviewprep.shared.web.PageResponse;
 import java.math.BigDecimal;
@@ -172,7 +174,7 @@ class ExpenseControllerTest {
     @Test
     @DisplayName("EXP-03 listing returns a page of expenses")
     void listReturnsPage() throws Exception {
-        given(service.list(any())).willReturn(new PageResponse<>(List.of(lunch()), 0, 20, 1, 1));
+        given(service.list(any(), any())).willReturn(new PageResponse<>(List.of(lunch()), 0, 20, 1, 1));
 
         mockMvc.perform(get("/api/v1/expenses"))
                 .andExpect(status().isOk())
@@ -181,9 +183,62 @@ class ExpenseControllerTest {
                 .andExpect(jsonPath("$.size").value(20))
                 .andExpect(jsonPath("$.totalElements").value(1));
 
+        ArgumentCaptor<ExpenseFilter> filter = ArgumentCaptor.forClass(ExpenseFilter.class);
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(service).list(pageable.capture());
+        verify(service).list(filter.capture(), pageable.capture());
+        assertThat(filter.getValue()).isEqualTo(new ExpenseFilter(null, null, null));
         assertThat(pageable.getValue().getPageSize()).isEqualTo(20);
+    }
+
+    @Test
+    @DisplayName("EXP-08 listing passes the date range, category and page to the service")
+    void listPassesFilterToService() throws Exception {
+        given(service.list(any(), any())).willReturn(new PageResponse<>(List.of(lunch()), 1, 5, 6, 2));
+
+        mockMvc.perform(get("/api/v1/expenses")
+                        .param("from", "2026-10-01")
+                        .param("to", "2026-10-31")
+                        .param("category", "FOOD")
+                        .param("page", "1")
+                        .param("size", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].category").value("FOOD"));
+
+        ArgumentCaptor<ExpenseFilter> filter = ArgumentCaptor.forClass(ExpenseFilter.class);
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(service).list(filter.capture(), pageable.capture());
+        assertThat(filter.getValue())
+                .isEqualTo(
+                        new ExpenseFilter(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31), ExpenseCategory.FOOD));
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("EXP-09 listing with from after to returns 400 problem detail")
+    void listWithInvertedRangeRejected() throws Exception {
+        LocalDate from = LocalDate.of(2026, 10, 31);
+        LocalDate to = LocalDate.of(2026, 10, 1);
+        given(service.list(any(), any())).willThrow(new InvalidDateRangeException(from, to));
+
+        mockMvc.perform(get("/api/v1/expenses").param("from", "2026-10-31").param("to", "2026-10-01"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("https://be-interview-prep/problems/invalid-date-range"))
+                .andExpect(jsonPath("$.title").value("Invalid date range"));
+    }
+
+    @Test
+    @DisplayName("EXP-09 listing with an unknown category or a malformed date returns 400")
+    void listWithMalformedParametersRejected() throws Exception {
+        mockMvc.perform(get("/api/v1/expenses").param("category", "LEISURE"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad request"));
+        mockMvc.perform(get("/api/v1/expenses").param("from", "01/10/2026"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad request"));
+
+        verifyNoInteractions(service);
     }
 
     @Test

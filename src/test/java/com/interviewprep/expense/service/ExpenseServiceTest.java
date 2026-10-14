@@ -6,7 +6,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.interviewprep.expense.dto.ExpenseFilter;
 import com.interviewprep.expense.dto.ExpenseRequest;
 import com.interviewprep.expense.dto.ExpenseResponse;
 import com.interviewprep.expense.entity.Expense;
@@ -31,12 +33,14 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class ExpenseServiceTest {
 
     private static final UUID EXPENSE_ID = UUID.fromString("7f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f");
+    private static final ExpenseFilter NO_FILTER = new ExpenseFilter(null, null, null);
 
     @Mock
     private ExpenseRepository repository;
@@ -73,18 +77,45 @@ class ExpenseServiceTest {
     void listCapsPageSizeAndSortsNewestFirst() {
         Expense stored =
                 withId(new Expense(new BigDecimal("3.00"), ExpenseCategory.OTHER, LocalDate.of(2026, 10, 3), null));
-        given(repository.findAll(any(Pageable.class)))
-                .willAnswer(invocation -> new PageImpl<>(List.of(stored), invocation.getArgument(0), 1));
+        given(repository.findAll(anySpecification(), any(Pageable.class)))
+                .willAnswer(invocation -> new PageImpl<>(List.of(stored), invocation.getArgument(1), 1));
 
-        PageResponse<ExpenseResponse> page = service.list(PageRequest.of(2, 500));
+        PageResponse<ExpenseResponse> page = service.list(NO_FILTER, PageRequest.of(2, 500));
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(repository).findAll(pageable.capture());
+        verify(repository).findAll(anySpecification(), pageable.capture());
         assertThat(pageable.getValue().getPageNumber()).isEqualTo(2);
         assertThat(pageable.getValue().getPageSize()).isEqualTo(ExpenseService.MAX_PAGE_SIZE);
         assertThat(pageable.getValue().getSort().getOrderFor("date")).isEqualTo(Sort.Order.desc("date"));
         assertThat(page.size()).isEqualTo(100);
         assertThat(page.content()).extracting(ExpenseResponse::id).containsExactly(EXPENSE_ID);
+    }
+
+    @Test
+    @DisplayName("EXP-08 list accepts a single-day range where from equals to")
+    void listAcceptsSingleDayRange() {
+        LocalDate day = LocalDate.of(2026, 10, 31);
+        given(repository.findAll(anySpecification(), any(Pageable.class)))
+                .willAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(1), 0));
+
+        PageResponse<ExpenseResponse> page =
+                service.list(new ExpenseFilter(day, day, ExpenseCategory.BILLS), PageRequest.of(0, 20));
+
+        assertThat(page.content()).isEmpty();
+        assertThat(page.totalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("EXP-09 list rejects a range whose from is after its to without querying")
+    void listRejectsInvertedRange() {
+        ExpenseFilter inverted = new ExpenseFilter(LocalDate.of(2026, 10, 31), LocalDate.of(2026, 10, 1), null);
+
+        assertThatThrownBy(() -> service.list(inverted, PageRequest.of(0, 20)))
+                .isInstanceOf(InvalidDateRangeException.class)
+                .hasMessageContaining("2026-10-31")
+                .hasMessageContaining("2026-10-01");
+
+        verifyNoInteractions(repository);
     }
 
     @Test
@@ -158,6 +189,10 @@ class ExpenseServiceTest {
 
     private static Expense lunch() {
         return withId(new Expense(new BigDecimal("12.50"), ExpenseCategory.FOOD, LocalDate.of(2026, 10, 1), "Lunch"));
+    }
+
+    private static Specification<Expense> anySpecification() {
+        return any();
     }
 
     private static Expense withId(Expense expense) {
