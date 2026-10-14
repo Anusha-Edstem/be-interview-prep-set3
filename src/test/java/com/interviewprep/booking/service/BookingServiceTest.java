@@ -222,6 +222,42 @@ class BookingServiceTest {
     }
 
     @Test
+    @DisplayName("BOOK-13 cancelling an own booking returns the freed slot")
+    void cancelReturnsFreedSlot() {
+        Slot slot = slot(DAY_START);
+        when(slotRepository.cancel(slot.getId(), "patient-1")).thenReturn(1);
+        when(slotRepository.findById(slot.getId())).thenReturn(Optional.of(slot));
+
+        SlotResponse response = service.cancel(slot.getId(), "patient-1");
+
+        assertThat(response.status()).isEqualTo(SlotStatus.AVAILABLE);
+        assertThat(response.patientId()).isNull();
+    }
+
+    @Test
+    @DisplayName("BOOK-14 cancelling a slot not booked by the patient raises booking-not-cancellable")
+    void cancelOthersBookingIsConflict() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.cancel(slotId, "patient-2")).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.cancel(slotId, "patient-2"))
+                .isInstanceOf(ConflictException.class)
+                .extracting("type")
+                .isEqualTo("booking-not-cancellable");
+    }
+
+    @Test
+    @DisplayName("BOOK-07 cancelling a slot that does not exist raises not found")
+    void cancelUnknownSlotIsNotFound() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.cancel(slotId, "patient-1")).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.cancel(slotId, "patient-1")).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
     @DisplayName("BOOK-12 releasing expired holds uses the current time")
     void releaseExpiredHoldsUsesClock() {
         when(slotRepository.releaseExpiredHolds(NOW)).thenReturn(3);

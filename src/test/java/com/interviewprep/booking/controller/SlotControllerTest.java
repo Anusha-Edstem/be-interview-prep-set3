@@ -148,6 +148,46 @@ class SlotControllerTest {
         perform("confirm", SLOT_ID.toString(), PATIENT_BODY).andExpect(status().isNotFound());
     }
 
+    @Test
+    @DisplayName("BOOK-13 cancelling an own booking returns the freed slot")
+    void cancelReturnsFreedSlot() throws Exception {
+        when(bookingService.cancel(SLOT_ID, "patient-1"))
+                .thenReturn(new SlotResponse(SLOT_ID, DOCTOR_ID, START, END, SlotStatus.AVAILABLE, null, null));
+
+        perform("cancel", SLOT_ID.toString(), PATIENT_BODY)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.patientId").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("BOOK-14 cancelling a slot not booked by the patient is a 409 booking-not-cancellable problem")
+    void cancelNotOwnBookingIsConflict() throws Exception {
+        when(bookingService.cancel(SLOT_ID, "patient-1"))
+                .thenThrow(new ConflictException(
+                        "booking-not-cancellable", "Booking not cancellable", "The slot is not booked"));
+
+        perform("cancel", SLOT_ID.toString(), PATIENT_BODY)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("https://be-interview-prep/problems/booking-not-cancellable"));
+    }
+
+    @Test
+    @DisplayName("BOOK-06 cancel validates the patient id")
+    void cancelValidatesBody() throws Exception {
+        perform("cancel", SLOT_ID.toString(), "{\"patientId\":\"\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("patientId"));
+    }
+
+    @Test
+    @DisplayName("BOOK-07 cancelling an unknown slot is a 404 problem")
+    void cancelUnknownSlotIsNotFound() throws Exception {
+        when(bookingService.cancel(SLOT_ID, "patient-1")).thenThrow(new NotFoundException("Slot", SLOT_ID));
+
+        perform("cancel", SLOT_ID.toString(), PATIENT_BODY).andExpect(status().isNotFound());
+    }
+
     private ResultActions perform(String action, String slotId, String body) throws Exception {
         return mockMvc.perform(post("/api/v1/slots/{slotId}/{action}", slotId, action)
                 .contentType(MediaType.APPLICATION_JSON)

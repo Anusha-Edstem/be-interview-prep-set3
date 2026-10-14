@@ -102,6 +102,17 @@ public class BookingService {
     }
 
     @Transactional
+    public SlotResponse cancel(UUID slotId, String patientId) {
+        int cancelled = slotRepository.cancel(slotId, patientId);
+        if (cancelled == 0) {
+            requireExists(slotId);
+            throw new ConflictException(
+                    "booking-not-cancellable", "Booking not cancellable", "The slot is not booked by this patient");
+        }
+        return mapper.toResponse(load(slotId));
+    }
+
+    @Transactional
     public int releaseExpiredHolds() {
         return slotRepository.releaseExpiredHolds(now());
     }

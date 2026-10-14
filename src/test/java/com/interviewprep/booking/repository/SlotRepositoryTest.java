@@ -163,6 +163,39 @@ class SlotRepositoryTest {
     }
 
     @Test
+    @DisplayName("BOOK-13 the patient who booked a slot can cancel it, freeing the slot")
+    void cancelOwnBooking() {
+        Slot slot = freeSlot(NINE);
+        slotRepository.hold(slot.getId(), "patient-1", NOW, NOW.plus(HOLD));
+        slotRepository.confirm(slot.getId(), "patient-1", NOW);
+
+        int updated = slotRepository.cancel(slot.getId(), "patient-1");
+
+        Slot reloaded = slotRepository.findById(slot.getId()).orElseThrow();
+        assertThat(updated).isEqualTo(1);
+        assertThat(reloaded.getStatus()).isEqualTo(SlotStatus.AVAILABLE);
+        assertThat(reloaded.getPatientId()).isNull();
+    }
+
+    @Test
+    @DisplayName("BOOK-14 a hold or another patient's booking cannot be cancelled")
+    void cancelRequiresOwnBooking() {
+        Slot held = freeSlot(NINE);
+        Slot booked = freeSlot(NINE.plus(SLOT));
+        slotRepository.hold(held.getId(), "patient-1", NOW, NOW.plus(HOLD));
+        slotRepository.hold(booked.getId(), "patient-1", NOW, NOW.plus(HOLD));
+        slotRepository.confirm(booked.getId(), "patient-1", NOW);
+
+        int heldUpdated = slotRepository.cancel(held.getId(), "patient-1");
+        int otherUpdated = slotRepository.cancel(booked.getId(), "patient-2");
+
+        assertThat(heldUpdated).isZero();
+        assertThat(otherUpdated).isZero();
+        assertThat(slotRepository.findById(booked.getId()).orElseThrow().getStatus())
+                .isEqualTo(SlotStatus.BOOKED);
+    }
+
+    @Test
     @DisplayName("BOOK-07 a hold on a slot that does not exist updates nothing")
     void holdUnknownSlotUpdatesNothing() {
         int updated = slotRepository.hold(UUID.randomUUID(), "patient-1", NOW, NOW.plus(HOLD));

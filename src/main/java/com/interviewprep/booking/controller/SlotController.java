@@ -30,4 +30,9 @@ public class SlotController {
     public SlotResponse confirm(@PathVariable UUID slotId, @Valid @RequestBody PatientRequest request) {
         return bookingService.confirm(slotId, request.patientId());
     }
+
+    @PostMapping("/{slotId}/cancel")
+    public SlotResponse cancel(@PathVariable UUID slotId, @Valid @RequestBody PatientRequest request) {
+        return bookingService.cancel(slotId, request.patientId());
+    }
 }

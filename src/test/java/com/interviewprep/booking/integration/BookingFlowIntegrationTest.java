@@ -40,4 +40,38 @@ class BookingFlowIntegrationTest extends BookingIntegrationTestSupport {
         assertThat(confirm.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(confirm.getBody().get("type").asText()).endsWith("/hold-not-active");
     }
+
+    @Test
+    @DisplayName("BOOK-13 cancelling a confirmed booking frees the slot for another patient")
+    void cancelFreesTheSlot() {
+        UUID slotId = firstAvailableSlot();
+        post("hold", slotId, "patient-1");
+        post("confirm", slotId, "patient-1");
+
+        ResponseEntity<JsonNode> cancel = post("cancel", slotId, "patient-1");
+        JsonNode available = listSlots(DOCTOR_ID, DAY).getBody();
+        ResponseEntity<JsonNode> nextHold = post("hold", slotId, "patient-2");
+
+        assertThat(cancel.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(cancel.getBody().get("status").asText()).isEqualTo("AVAILABLE");
+        assertThat(available).hasSize(16);
+        assertThat(nextHold.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    @DisplayName("BOOK-14 a booking cannot be cancelled by another patient or cancelled twice")
+    void cancelRequiresOwnLiveBooking() {
+        UUID slotId = firstAvailableSlot();
+        post("hold", slotId, "patient-1");
+        post("confirm", slotId, "patient-1");
+
+        ResponseEntity<JsonNode> byOther = post("cancel", slotId, "patient-2");
+        ResponseEntity<JsonNode> first = post("cancel", slotId, "patient-1");
+        ResponseEntity<JsonNode> second = post("cancel", slotId, "patient-1");
+
+        assertThat(byOther.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(byOther.getBody().get("type").asText()).endsWith("/booking-not-cancellable");
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
 }
