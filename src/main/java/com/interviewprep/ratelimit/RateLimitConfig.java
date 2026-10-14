@@ -12,16 +12,14 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 @EnableScheduling
-public class RateLimitConfig implements WebMvcConfigurer, SchedulingConfigurer {
+public class RateLimitConfig implements SchedulingConfigurer {
 
     private final RateLimitProperties properties;
     private final Clock clock;
-    private final ObjectMapper objectMapper;
 
-    public RateLimitConfig(RateLimitProperties properties, Clock clock, ObjectMapper objectMapper) {
+    public RateLimitConfig(RateLimitProperties properties, Clock clock) {
         this.properties = properties;
         this.clock = clock;
-        this.objectMapper = objectMapper;
     }
 
     @Bean
@@ -29,10 +27,15 @@ public class RateLimitConfig implements WebMvcConfigurer, SchedulingConfigurer {
         return new SlidingWindowRateLimiter(properties.maxRequests(), properties.window(), clock);
     }
 
-    @Override
-    public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new RateLimitInterceptor(slidingWindowRateLimiter(), objectMapper))
-                .addPathPatterns(properties.paths());
+    @Bean
+    public WebMvcConfigurer rateLimitWebMvcConfigurer(SlidingWindowRateLimiter limiter, ObjectMapper objectMapper) {
+        return new WebMvcConfigurer() {
+            @Override
+            public void addInterceptors(InterceptorRegistry registry) {
+                registry.addInterceptor(new RateLimitInterceptor(limiter, objectMapper))
+                        .addPathPatterns(properties.paths());
+            }
+        };
     }
 
     @Override
