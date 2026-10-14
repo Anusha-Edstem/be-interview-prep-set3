@@ -9,6 +9,10 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      max-file-size: 6MB
+      max-request-size: 7MB
 management:
   endpoints:
     web:
@@ -21,3 +25,6 @@ booking:
   day-end: "17:00"
   zone: UTC
   expiry-sweep-interval: 1h
+file-storage:
+  location: ${java.io.tmpdir}/be-interview-prep-test/storage
+  max-file-size: 5MB
