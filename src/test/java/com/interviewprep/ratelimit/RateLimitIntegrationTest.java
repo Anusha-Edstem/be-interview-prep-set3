@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -21,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -38,6 +40,9 @@ class RateLimitIntegrationTest {
     @Autowired
     private SlidingWindowRateLimiter limiter;
 
+    @Autowired
+    private MutableClock clock;
+
     @Test
     @DisplayName("RL-02 ten requests succeed and the eleventh in the same minute is rejected with 429")
     void eleventhRequestRejected() throws Exception {
@@ -54,7 +59,35 @@ class RateLimitIntegrationTest {
 
         eleventh.andExpect(status().isTooManyRequests())
                 .andExpect(header().string(RateLimitInterceptor.LIMIT_HEADER, "10"))
-                .andExpect(header().string(RateLimitInterceptor.REMAINING_HEADER, "0"));
+                .andExpect(header().string(RateLimitInterceptor.REMAINING_HEADER, "0"))
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "60"))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.status").value(429))
+                .andExpect(jsonPath("$.type").value("https://be-interview-prep/problems/rate-limit-exceeded"))
+                .andExpect(jsonPath("$.title").value("Too many requests"))
+                .andExpect(jsonPath("$.detail").value("Rate limit exceeded, retry after 60 seconds"))
+                .andExpect(jsonPath("$.instance").value(QUOTE_PATH))
+                .andExpect(jsonPath("$.retryAfterSeconds").value(60));
+    }
+
+    @Test
+    @DisplayName("RL-02 retry-after counts down and the client is served again once the window has passed")
+    void servedAgainAfterWindow() throws Exception {
+        String apiKey = uniqueKey();
+        for (int i = 0; i < 10; i++) {
+            requestQuote(apiKey);
+        }
+
+        clock.advance(Duration.ofSeconds(45));
+        ResultActions stillLimited = requestQuote(apiKey);
+        clock.advance(Duration.ofSeconds(15));
+        ResultActions afterWindow = requestQuote(apiKey);
+
+        stillLimited
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "15"))
+                .andExpect(jsonPath("$.retryAfterSeconds").value(15));
+        afterWindow.andExpect(status().isOk()).andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
     }
 
     @Test

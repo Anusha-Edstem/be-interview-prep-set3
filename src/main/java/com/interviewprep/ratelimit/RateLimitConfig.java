@@ -1,5 +1,6 @@
 package com.interviewprep.ratelimit;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,10 +12,12 @@ public class RateLimitConfig implements WebMvcConfigurer {
 
     private final RateLimitProperties properties;
     private final Clock clock;
+    private final ObjectMapper objectMapper;
 
-    public RateLimitConfig(RateLimitProperties properties, Clock clock) {
+    public RateLimitConfig(RateLimitProperties properties, Clock clock, ObjectMapper objectMapper) {
         this.properties = properties;
         this.clock = clock;
+        this.objectMapper = objectMapper;
     }
 
     @Bean
@@ -24,7 +27,7 @@ public class RateLimitConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new RateLimitInterceptor(slidingWindowRateLimiter()))
+        registry.addInterceptor(new RateLimitInterceptor(slidingWindowRateLimiter(), objectMapper))
                 .addPathPatterns(properties.paths());
     }
 }
