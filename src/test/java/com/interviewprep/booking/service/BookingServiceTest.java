@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.interviewprep.booking.config.BookingProperties;
@@ -20,6 +21,7 @@ import com.interviewprep.booking.entity.Doctor;
 import com.interviewprep.booking.entity.Slot;
 import com.interviewprep.booking.entity.SlotStatus;
 import com.interviewprep.booking.mapper.BookingMapper;
+import com.interviewprep.booking.notification.BookingConfirmedEvent;
 import com.interviewprep.booking.repository.DoctorRepository;
 import com.interviewprep.booking.repository.SlotRepository;
 import com.interviewprep.shared.error.ConflictException;
@@ -41,6 +43,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -65,6 +68,9 @@ class BookingServiceTest {
     @Mock
     private SlotMaterializer slotMaterializer;
 
+    @Mock
+    private ApplicationEventPublisher events;
+
     private BookingService service;
 
     @BeforeEach
@@ -83,6 +89,7 @@ class BookingServiceTest {
                 slotMaterializer,
                 new BookingMapper(),
                 properties,
+                events,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -196,6 +203,30 @@ class BookingServiceTest {
 
         assertThat(response.status()).isEqualTo(SlotStatus.BOOKED);
         assertThat(response.holdExpiresAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("BOOK-15 a successful confirm publishes a booking-confirmed event")
+    void confirmPublishesEvent() {
+        Slot slot = withState(slot(DAY_START), SlotStatus.BOOKED, "patient-1", null);
+        when(slotRepository.confirm(slot.getId(), "patient-1", NOW)).thenReturn(1);
+        when(slotRepository.findById(slot.getId())).thenReturn(Optional.of(slot));
+
+        service.confirm(slot.getId(), "patient-1");
+
+        verify(events).publishEvent(new BookingConfirmedEvent(slot.getId(), DOCTOR_ID, DAY_START));
+    }
+
+    @Test
+    @DisplayName("BOOK-15 a rejected confirm publishes no event")
+    void rejectedConfirmPublishesNothing() {
+        UUID slotId = UUID.randomUUID();
+        when(slotRepository.confirm(slotId, "patient-2", NOW)).thenReturn(0);
+        when(slotRepository.existsById(slotId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.confirm(slotId, "patient-2")).isInstanceOf(ConflictException.class);
+
+        verifyNoInteractions(events);
     }
 
     @Test

@@ -39,8 +39,9 @@ _Pending._
 | POST | `/api/v1/slots/{slotId}/hold`, `/confirm`, `/cancel` | none | unknown `slotId` | `404` problem detail | BOOK-07 |
 | POST | `/api/v1/slots/{slotId}/hold` | none | slot actively held or booked | `409` problem detail, type `slot-unavailable` | BOOK-08 |
 | POST | `/api/v1/slots/{slotId}/hold` then `/confirm` | none | 20 patients holding and confirming the same slot at the same moment | exactly one booking; nineteen `409 slot-unavailable` on hold | BOOK-09 |
-| POST | `/api/v1/slots/{slotId}/confirm` | none (patient id in body) | `{"patientId"}` of the patient holding the slot, before the hold expires | `200 {…, status: "BOOKED", holdExpiresAt: null}` | BOOK-10 |
+| POST | `/api/v1/slots/{slotId}/confirm` | none (patient id in body) | `{"patientId"}` of the patient holding the slot, before the hold expires | `200 {…, status: "BOOKED", holdExpiresAt: null}`; the booking notification is sent after commit | BOOK-10 |
 | POST | `/api/v1/slots/{slotId}/confirm` | none | hold expired, held by another patient, or slot not held | `409` problem detail, type `hold-not-active` | BOOK-11 |
 | — | scheduled, every `booking.expiry-sweep-interval` | — | an unconfirmed hold older than 5 minutes | the slot is listed and holdable again at once (lazy expiry); the sweep resets it to `AVAILABLE` in the table; a late confirm is `409 hold-not-active` | BOOK-12 |
 | POST | `/api/v1/slots/{slotId}/cancel` | none (patient id in body) | `{"patientId"}` of the patient who booked the slot | `200 {…, status: "AVAILABLE", patientId: null}` — the slot is bookable again | BOOK-13 |
 | POST | `/api/v1/slots/{slotId}/cancel` | none | slot not booked, or booked by another patient | `409` problem detail, type `booking-not-cancellable` | BOOK-14 |
+| — | event after `/confirm` commits | — | `BookingConfirmedEvent` | notification logged once on the `booking-notify-` pool after commit, without delaying the response; none when the confirm is rejected or rolled back | BOOK-15 |

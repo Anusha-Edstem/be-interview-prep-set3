@@ -6,6 +6,7 @@ import com.interviewprep.booking.dto.DoctorResponse;
 import com.interviewprep.booking.dto.SlotResponse;
 import com.interviewprep.booking.entity.Slot;
 import com.interviewprep.booking.mapper.BookingMapper;
+import com.interviewprep.booking.notification.BookingConfirmedEvent;
 import com.interviewprep.booking.repository.DoctorRepository;
 import com.interviewprep.booking.repository.SlotRepository;
 import com.interviewprep.shared.error.ConflictException;
@@ -17,6 +18,7 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -36,6 +38,7 @@ public class BookingService {
     private final SlotMaterializer slotMaterializer;
     private final BookingMapper mapper;
     private final BookingProperties properties;
+    private final ApplicationEventPublisher events;
     private final Clock clock;
 
     public BookingService(
@@ -45,6 +48,7 @@ public class BookingService {
             SlotMaterializer slotMaterializer,
             BookingMapper mapper,
             BookingProperties properties,
+            ApplicationEventPublisher events,
             Clock clock) {
         this.doctorRepository = doctorRepository;
         this.slotRepository = slotRepository;
@@ -52,6 +56,7 @@ public class BookingService {
         this.slotMaterializer = slotMaterializer;
         this.mapper = mapper;
         this.properties = properties;
+        this.events = events;
         this.clock = clock;
     }
 
@@ -98,7 +103,9 @@ public class BookingService {
                     "Hold not active",
                     "The slot is not held by this patient or the hold has expired");
         }
-        return mapper.toResponse(load(slotId));
+        Slot booked = load(slotId);
+        events.publishEvent(new BookingConfirmedEvent(booked.getId(), booked.getDoctorId(), booked.getStartTime()));
+        return mapper.toResponse(booked);
     }
 
     @Transactional
