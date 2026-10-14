@@ -18,6 +18,11 @@ management:
     web:
       exposure:
         include: health
+rate-limit:
+  max-requests: 10
+  window: 1m
+  paths:
+    - /api/v1/quotes/**
 file-storage:
   location: ${java.io.tmpdir}/be-interview-prep-test/storage
   max-file-size: 5MB
